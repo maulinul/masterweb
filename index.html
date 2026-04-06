@@ -1,0 +1,295 @@
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--font-sans,-apple-system,sans-serif);font-size:15px;color:var(--color-text-primary);background:transparent}
+.wrap{padding:1rem 0 2rem}
+.top{display:flex;align-items:baseline;gap:10px;margin-bottom:1.5rem;flex-wrap:wrap}
+.app-title{font-size:17px;font-weight:500}
+.app-sub{font-size:13px;color:var(--color-text-secondary)}
+.section-label{font-size:11px;font-weight:500;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
+.pill-row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:1.25rem}
+.pill{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:20px;border:0.5px solid var(--color-border-secondary);background:var(--color-background-primary);font-size:12px;font-weight:500;color:var(--color-text-secondary);cursor:pointer;transition:all .15s;user-select:none}
+.pill:hover{background:var(--color-background-secondary)}
+.pill.sel{background:var(--color-background-info);border-color:var(--color-border-info);color:var(--color-text-info)}
+.pill.sel-red{background:#fcebeb;border-color:#f09595;color:#a32d2d}
+.pill.sel-amber{background:#faeeda;border-color:#ef9f27;color:#633806}
+.pill.sel-teal{background:#e1f5ee;border-color:#5dcaa5;color:#085041}
+.pill.sel-purple{background:#eeedfe;border-color:#afa9ec;color:#26215c}
+.dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:1.25rem}
+@media(max-width:540px){.grid2{grid-template-columns:1fr}}
+select,input[type=text]{width:100%;font-size:13px;padding:8px 10px;border:0.5px solid var(--color-border-secondary);border-radius:8px;background:var(--color-background-primary);color:var(--color-text-primary);outline:none}
+select:focus,input:focus{border-color:var(--color-border-primary)}
+.checkbox-group{display:flex;flex-direction:column;gap:6px;margin-bottom:1.25rem}
+.cb-item{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--color-text-secondary);cursor:pointer}
+.cb-item input{width:14px;height:14px;cursor:pointer}
+.preview-box{background:var(--color-background-secondary);border-radius:10px;padding:14px 16px;margin-bottom:1rem;min-height:90px}
+.preview-label{font-size:11px;color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px}
+.preview-text{font-size:13px;color:var(--color-text-primary);line-height:1.7;word-break:break-word}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap}
+button.action{padding:9px 18px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;border:0.5px solid var(--color-border-secondary);background:var(--color-background-primary);color:var(--color-text-primary);transition:all .15s}
+button.action:hover{background:var(--color-background-secondary)}
+button.action.primary{background:var(--color-text-primary);color:var(--color-background-primary);border-color:var(--color-text-primary)}
+button.action.primary:hover{opacity:.88}
+.tag-list{display:flex;flex-wrap:wrap;gap:5px;margin-top:10px}
+.mini-tag{font-size:11px;padding:3px 8px;border-radius:12px;background:var(--color-background-secondary);color:var(--color-text-secondary);border:0.5px solid var(--color-border-tertiary)}
+.divider{border:none;border-top:0.5px solid var(--color-border-tertiary);margin:1.25rem 0}
+.copy-ok{color:#1d9e75;font-size:12px;margin-left:8px;opacity:0;transition:opacity .3s}
+.template-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;margin-bottom:1.25rem}
+.tpl-card{border:0.5px solid var(--color-border-tertiary);border-radius:10px;padding:10px 12px;cursor:pointer;transition:all .15s;background:var(--color-background-primary)}
+.tpl-card:hover{border-color:var(--color-border-secondary);background:var(--color-background-secondary)}
+.tpl-card.sel{border-color:var(--color-border-info);background:var(--color-background-info)}
+.tpl-title{font-size:12px;font-weight:500;color:var(--color-text-primary);margin-bottom:3px}
+.tpl-sub{font-size:11px;color:var(--color-text-tertiary)}
+</style>
+
+<div class="wrap">
+  <div class="top">
+    <span class="app-title">Pembuat Prompt Pencarian Berita Pasar Saham</span>
+    <span class="app-sub">IHSG & Global · 2011–2026</span>
+  </div>
+
+  <div class="section-label">1. Pilih Peristiwa / Krisis</div>
+  <div class="pill-row" id="event-pills"></div>
+
+  <div class="section-label">2. Pilih Template Analisis</div>
+  <div class="template-grid" id="tpl-grid"></div>
+
+  <div class="section-label">3. Fokus Topik Tambahan</div>
+  <div class="pill-row" id="topic-pills"></div>
+
+  <div class="grid2">
+    <div>
+      <div class="section-label">4. Indeks / Pasar</div>
+      <div class="pill-row" id="index-pills" style="margin-bottom:0"></div>
+    </div>
+    <div>
+      <div class="section-label">5. Kedalaman Analisis</div>
+      <select id="depth">
+        <option value="ringkas">Ringkas — poin-poin utama saja</option>
+        <option value="standar" selected>Standar — analisis lengkap & tabel</option>
+        <option value="mendalam">Mendalam — bukti empiris & akademik</option>
+        <option value="investor">Perspektif Investor — rekomendasi praktis</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="section-label" style="margin-top:1rem">6. Sudut Pandang Khusus</div>
+  <div class="checkbox-group">
+    <label class="cb-item"><input type="checkbox" id="cb1" checked> Sertakan dampak pada IHSG & Rupiah</label>
+    <label class="cb-item"><input type="checkbox" id="cb2" checked> Faktor makroekonomi (inflasi, suku bunga, kurs)</label>
+    <label class="cb-item"><input type="checkbox" id="cb3"> Bukti empiris dari studi akademik (partial adjustment model)</label>
+    <label class="cb-item"><input type="checkbox" id="cb4"> Argumen kontra & perspektif berimbang</label>
+    <label class="cb-item"><input type="checkbox" id="cb5"> Dampak pada investor ritel domestik</label>
+    <label class="cb-item"><input type="checkbox" id="cb6"> Perbandingan dengan negara ASEAN lain</label>
+    <label class="cb-item"><input type="checkbox" id="cb7"> Proyeksi & outlook ke depan</label>
+  </div>
+
+  <div class="section-label">7. Sumber Prioritas</div>
+  <div class="pill-row" id="source-pills"></div>
+
+  <hr class="divider">
+
+  <div class="preview-label">Pratinjau Prompt yang Dihasilkan</div>
+  <div class="preview-box">
+    <div class="preview-text" id="preview-text">Pilih opsi di atas untuk melihat prompt yang dihasilkan...</div>
+  </div>
+  <div class="tag-list" id="tag-list"></div>
+
+  <div class="btn-row" style="margin-top:12px">
+    <button class="action primary" onclick="runSearch()">Jalankan Pencarian Berita ↗</button>
+    <button class="action" onclick="copyPrompt()">Salin Prompt</button>
+    <span class="copy-ok" id="copy-ok">Tersalin!</span>
+    <button class="action" onclick="resetAll()">Reset</button>
+  </div>
+</div>
+
+<script>
+const EVENTS = [
+  {id:'utang2011',label:'Plafon Utang AS 2011',color:'sel-red',dot:'#e24b4a',year:'2011'},
+  {id:'china2015',label:'Crash China 2015–16',color:'sel-red',dot:'#d85a30',year:'2015'},
+  {id:'covid2020',label:'COVID-19 2020',color:'sel-red',dot:'#a32d2d',year:'2020'},
+  {id:'rusia2022',label:'Crash Rusia 2022',color:'sel-purple',dot:'#534ab7',year:'2022'},
+  {id:'inflasi2022',label:'Inflasi & Fed 2022',color:'sel-amber',dot:'#ba7517',year:'2022'},
+  {id:'china2024',label:'Crash China 2024',color:'sel-red',dot:'#d85a30',year:'2024'},
+  {id:'tokyo2024',label:'Crash Tokyo 2024',color:'sel-teal',dot:'#1d9e75',year:'2024'},
+  {id:'tarif2025',label:'Tarif Trump 2025',color:'sel-amber',dot:'#ba7517',year:'2025'},
+  {id:'msci2026',label:'Krisis MSCI IHSG 2026',color:'sel-red',dot:'#e24b4a',year:'2026'},
+];
+const TEMPLATES = [
+  {id:'berita',title:'Cari berita terkini',sub:'Artikel & laporan terbaru'},
+  {id:'analisis',title:'Analisis penyebab',sub:'Faktor & kontribusi setiap pemicu'},
+  {id:'dampak',title:'Dampak ke IHSG',sub:'Angka, persentase, timeline'},
+  {id:'pemulihan',title:'Timeline pemulihan',sub:'Berapa lama & strategi'},
+  {id:'perbandingan',title:'Bandingkan antar krisis',sub:'Persamaan & perbedaan'},
+  {id:'akademik',title:'Studi & riset ilmiah',sub:'Paper, model, temuan empiris'},
+  {id:'rekomendasi',title:'Rekomendasi investor',sub:'Strategi & mitigasi risiko'},
+  {id:'global',title:'Konteks global vs lokal',sub:'Pengaruh eksternal vs domestik'},
+];
+const TOPICS = [
+  {id:'inflasi',label:'Inflasi'},
+  {id:'kurs',label:'Kurs Rupiah/USD'},
+  {id:'birate',label:'BI Rate'},
+  {id:'minyak',label:'Harga Minyak'},
+  {id:'asing',label:'Arus Modal Asing'},
+  {id:'komoditas',label:'Harga Komoditas'},
+  {id:'msci',label:'MSCI & Indeks Global'},
+  {id:'transparansi',label:'Transparansi & Tata Kelola'},
+  {id:'freefloat',label:'Free Float & Kepemilikan'},
+  {id:'goreng',label:'Saham Goreng'},
+  {id:'fed',label:'Kebijakan Fed AS'},
+  {id:'defisit',label:'Defisit Anggaran'},
+  {id:'politik',label:'Ketidakpastian Politik'},
+  {id:'vix',label:'VIX & Sentimen Global'},
+];
+const INDEXES = [
+  {id:'ihsg',label:'IHSG'},
+  {id:'sp500',label:'S&P 500'},
+  {id:'dji',label:'Dow Jones'},
+  {id:'nikkei',label:'Nikkei 225'},
+  {id:'shanghai',label:'Shanghai Comp.'},
+  {id:'nasdaq',label:'Nasdaq'},
+  {id:'lq45',label:'LQ45'},
+];
+const SOURCES = [
+  {id:'bloomberg',label:'Bloomberg'},
+  {id:'kontan',label:'Kontan.co.id'},
+  {id:'bisnis',label:'Bisnis.com'},
+  {id:'cnbcindo',label:'CNBC Indonesia'},
+  {id:'kompas',label:'Kompas.com'},
+  {id:'tempo',label:'Tempo.co'},
+  {id:'idx',label:'IDX / BEI'},
+  {id:'ojk',label:'OJK'},
+  {id:'wikipedia',label:'Wikipedia'},
+  {id:'akademik_src',label:'Jurnal Akademik'},
+];
+
+let selEvents=new Set(), selTpl=new Set(['berita']), selTopics=new Set(), selIndexes=new Set(['ihsg']), selSources=new Set(['bloomberg','cnbcindo','kontan']);
+
+function makePills(data,container,selSet,colorClass='sel'){
+  const el=document.getElementById(container);
+  data.forEach(d=>{
+    const p=document.createElement('div');
+    p.className='pill'+(selSet.has(d.id)?' '+(d.color||colorClass):'');
+    p.innerHTML=(d.dot?`<span class="dot" style="background:${d.dot}"></span>`:'')+'<span>'+d.label+'</span>';
+    p.onclick=()=>{
+      if(selSet.has(d.id))selSet.delete(d.id); else selSet.add(d.id);
+      p.className='pill'+(selSet.has(d.id)?' '+(d.color||colorClass):'');
+      buildPrompt();
+    };
+    el.appendChild(p);
+  });
+}
+
+function makeTplCards(){
+  const el=document.getElementById('tpl-grid');
+  TEMPLATES.forEach(d=>{
+    const c=document.createElement('div');
+    c.className='tpl-card'+(selTpl.has(d.id)?' sel':'');
+    c.innerHTML=`<div class="tpl-title">${d.title}</div><div class="tpl-sub">${d.sub}</div>`;
+    c.onclick=()=>{
+      if(selTpl.has(d.id))selTpl.delete(d.id); else selTpl.add(d.id);
+      c.className='tpl-card'+(selTpl.has(d.id)?' sel':'');
+      buildPrompt();
+    };
+    el.appendChild(c);
+  });
+}
+
+function buildPrompt(){
+  const evNames=EVENTS.filter(e=>selEvents.has(e.id)).map(e=>e.label);
+  const tplNames=TEMPLATES.filter(t=>selTpl.has(t.id)).map(t=>t.title.toLowerCase());
+  const topicNames=TOPICS.filter(t=>selTopics.has(t.id)).map(t=>t.label);
+  const idxNames=INDEXES.filter(i=>selIndexes.has(i.id)).map(i=>i.label);
+  const srcNames=SOURCES.filter(s=>selSources.has(s.id)).map(s=>s.label);
+  const depth=document.getElementById('depth').value;
+  const cb1=document.getElementById('cb1').checked;
+  const cb2=document.getElementById('cb2').checked;
+  const cb3=document.getElementById('cb3').checked;
+  const cb4=document.getElementById('cb4').checked;
+  const cb5=document.getElementById('cb5').checked;
+  const cb6=document.getElementById('cb6').checked;
+  const cb7=document.getElementById('cb7').checked;
+
+  if(evNames.length===0&&tplNames.length===0){
+    document.getElementById('preview-text').textContent='Pilih setidaknya satu peristiwa dan template analisis...';
+    document.getElementById('tag-list').innerHTML='';
+    return;
+  }
+
+  let prompt='';
+
+  const evStr=evNames.length>0?evNames.join(', '):'krisis pasar saham global dan Indonesia';
+  const tplStr=tplNames.length>0?tplNames.join(', dan '):'analisis menyeluruh';
+
+  prompt+=`Lakukan ${tplStr} mengenai: ${evStr}.`;
+
+  if(idxNames.length>0) prompt+=` Fokuskan pada indeks: ${idxNames.join(', ')}.`;
+
+  if(topicNames.length>0) prompt+=`\n\nTopik spesifik yang harus dibahas: ${topicNames.join(', ')}.`;
+
+  const extras=[];
+  if(cb1) extras.push('dampak langsung pada IHSG dan nilai tukar Rupiah terhadap USD');
+  if(cb2) extras.push('variabel makroekonomi (inflasi, suku bunga BI, kurs, harga minyak) beserta arah dan signifikansinya terhadap IHSG berdasarkan studi partial adjustment');
+  if(cb3) extras.push('bukti empiris dari penelitian akademik — termasuk model partial adjustment yang menunjukkan inflasi dan kurs berpengaruh negatif signifikan, sementara suku bunga dan minyak positif namun tidak signifikan');
+  if(cb4) extras.push('perspektif berimbang dan argumen kontra — misalnya peran trading otomatis dalam flash crash atau efek campuran harga minyak tergantung posisi Indonesia sebagai eksportir/importir');
+  if(cb5) extras.push('dampak pada investor ritel domestik, termasuk perilaku FOMO dan herding behavior di pasar Indonesia');
+  if(cb6) extras.push('perbandingan dengan negara ASEAN lain (Malaysia, Thailand, Filipina, Vietnam)');
+  if(cb7) extras.push('proyeksi dan outlook ke depan berdasarkan kondisi terkini');
+  if(extras.length>0) prompt+=`\n\nSertakan juga: ${extras.join('; ')}.`;
+
+  const depthMap={ringkas:'Sajikan secara ringkas dalam poin-poin utama.',standar:'Sajikan analisis lengkap dengan tabel perbandingan persentase penurunan dan pemicu utama.',mendalam:'Sajikan analisis mendalam dengan bukti empiris, referensi akademik, data statistik, dan tabel komprehensif.',investor:'Sajikan dari sudut pandang investor dengan rekomendasi strategis praktis, tips manajemen risiko, dan panduan alokasi aset.'};
+  prompt+=`\n\n${depthMap[depth]}`;
+
+  if(srcNames.length>0) prompt+=` Gunakan data dari: ${srcNames.join(', ')}.`;
+
+  prompt+=` Sampaikan dalam Bahasa Indonesia yang profesional namun mudah dipahami.`;
+
+  document.getElementById('preview-text').textContent=prompt;
+
+  const tags=[...evNames.slice(0,3),...topicNames.slice(0,3),...idxNames];
+  const tl=document.getElementById('tag-list');
+  tl.innerHTML=tags.map(t=>`<span class="mini-tag">${t}</span>`).join('');
+}
+
+function runSearch(){
+  const txt=document.getElementById('preview-text').textContent;
+  if(txt.startsWith('Pilih')){alert('Pilih setidaknya satu peristiwa dan template terlebih dahulu.');return;}
+  sendPrompt(txt);
+}
+
+function copyPrompt(){
+  const txt=document.getElementById('preview-text').textContent;
+  if(txt.startsWith('Pilih'))return;
+  navigator.clipboard.writeText(txt).then(()=>{
+    const el=document.getElementById('copy-ok');
+    el.style.opacity='1';
+    setTimeout(()=>el.style.opacity='0',2000);
+  });
+}
+
+function resetAll(){
+  selEvents.clear(); selTpl.clear(); selTpl.add('berita');
+  selTopics.clear(); selIndexes.clear(); selIndexes.add('ihsg');
+  selSources.clear(); selSources.add('bloomberg'); selSources.add('cnbcindo'); selSources.add('kontan');
+  document.querySelectorAll('.pill').forEach(p=>p.className='pill');
+  document.querySelectorAll('.tpl-card').forEach(c=>c.className='tpl-card');
+  document.getElementById('depth').value='standar';
+  ['cb1','cb2','cb3','cb4','cb5','cb6','cb7'].forEach((id,i)=>document.getElementById(id).checked=i<2);
+  document.getElementById('preview-text').textContent='Pilih opsi di atas untuk melihat prompt yang dihasilkan...';
+  document.getElementById('tag-list').innerHTML='';
+  document.querySelectorAll('#tpl-grid .tpl-card').forEach((c,i)=>{if(TEMPLATES[i].id==='berita')c.className='tpl-card sel';});
+  document.querySelectorAll('#index-pills .pill').forEach((p,i)=>{if(INDEXES[i].id==='ihsg')p.className='pill sel';});
+  document.querySelectorAll('#source-pills .pill').forEach((p,i)=>{if(['bloomberg','cnbcindo','kontan'].includes(SOURCES[i].id))p.className='pill sel';});
+}
+
+makePills(EVENTS,'event-pills',selEvents);
+makeTplCards();
+makePills(TOPICS,'topic-pills',selTopics);
+makePills(INDEXES,'index-pills',selIndexes);
+makePills(SOURCES,'source-pills',selSources);
+
+document.getElementById('depth').onchange=buildPrompt;
+['cb1','cb2','cb3','cb4','cb5','cb6','cb7'].forEach(id=>document.getElementById(id).onchange=buildPrompt);
+buildPrompt();
+</script>
