@@ -503,6 +503,82 @@ function collections(list){
   return [...m.entries()].sort((a,b)=>a[0].localeCompare(b[0]));
 }
 
+// ═══ SMART COLLECTIONS — auto-grouping by domain (non-destructive, computed) ═══
+// Each rule: category → domain suffixes. A link matches if its domain equals or
+// ends with any listed suffix (so subdomains count too).
+const DOMAIN_RULES={
+  'Development':['github.com','gitlab.com','bitbucket.org','stackoverflow.com','stackexchange.com','developer.mozilla.org','npmjs.com','vercel.com','netlify.com','heroku.com','docker.com','docker.io','kubernetes.io','codepen.io','codesandbox.io','replit.com','jsfiddle.net','css-tricks.com','dev.to','digitalocean.com','cloudflare.com','aws.amazon.com','cloud.google.com','portal.azure.com','jetbrains.com','python.org','nodejs.org','rust-lang.org','go.dev','php.net','ruby-lang.org','readthedocs.io','pypi.org'],
+  'AI Tools':['openai.com','chatgpt.com','claude.ai','anthropic.com','gemini.google.com','bard.google.com','huggingface.co','midjourney.com','perplexity.ai','poe.com','stability.ai','runwayml.com','character.ai','copilot.microsoft.com','deepmind.com','elevenlabs.io'],
+  'Design':['figma.com','dribbble.com','behance.net','canva.com','unsplash.com','pexels.com','fonts.google.com','coolors.co','adobe.com','sketch.com','framer.com','fontawesome.com'],
+  'Communication':['mail.google.com','gmail.com','outlook.com','slack.com','discord.com','discord.gg','whatsapp.com','telegram.org','t.me','teams.microsoft.com','zoom.us','meet.google.com','messenger.com','skype.com','proton.me'],
+  'Social':['twitter.com','x.com','facebook.com','instagram.com','linkedin.com','reddit.com','tiktok.com','threads.net','mastodon.social','pinterest.com','tumblr.com','snapchat.com'],
+  'Entertainment':['youtube.com','youtu.be','netflix.com','spotify.com','twitch.tv','soundcloud.com','primevideo.com','disneyplus.com','hulu.com','vimeo.com','hbomax.com','crunchyroll.com'],
+  'Productivity':['notion.so','trello.com','asana.com','monday.com','clickup.com','todoist.com','calendar.google.com','docs.google.com','drive.google.com','sheets.google.com','dropbox.com','evernote.com','airtable.com','miro.com','obsidian.md','linear.app','atlassian.net'],
+  'Finance':['paypal.com','stripe.com','wise.com','coinbase.com','binance.com','revolut.com','mint.com','chase.com'],
+  'Shopping':['amazon.com','ebay.com','etsy.com','aliexpress.com','shopee.co.id','tokopedia.com','walmart.com','bestbuy.com'],
+  'News':['nytimes.com','bbc.com','bbc.co.uk','cnn.com','theguardian.com','medium.com','news.ycombinator.com','reuters.com','bloomberg.com'],
+  'Search & Reference':['google.com','bing.com','duckduckgo.com','wikipedia.org','wolframalpha.com'],
+};
+const SMART_ORDER=['Development','AI Tools','Design','Productivity','Communication','Social','Entertainment','News','Shopping','Finance','Search & Reference','Internal'];
+function isInternalHost(dom){
+  if(!dom)return false;
+  if(/^\d{1,3}(\.\d{1,3}){3}$/.test(dom))return true;          // IP address
+  if(!dom.includes('.'))return true;                            // bare hostname
+  return /\.(internal|local|lan|test|localhost|corp|home)$/.test(dom);
+}
+// Domain-based category for a link, or '' if it doesn't match any rule.
+function smartCategory(l){
+  const dom=domainOf(l.u).toLowerCase();
+  for(const cat of SMART_ORDER){
+    const rules=DOMAIN_RULES[cat];if(!rules)continue;
+    if(rules.some(d=>dom===d||dom.endsWith('.'+d)))return cat;
+  }
+  if(isInternalHost(dom))return 'Internal';
+  return '';
+}
+const DAY=86400000;
+// Computed smart groups across the given list: domain categories + usage buckets.
+function smartGroups(list){
+  const dom=new Map();
+  list.forEach(l=>{const c=smartCategory(l);if(c)dom.set(c,(dom.get(c)||0)+1)});
+  const groups=SMART_ORDER.filter(c=>dom.has(c)).map(c=>({key:'d:'+c,label:c,n:dom.get(c)}));
+  const now=Date.now();
+  const recent=list.filter(l=>l.createdAt&&now-l.createdAt<7*DAY).length;
+  const frequent=list.filter(l=>(l.openCount||0)>=3).length;
+  if(recent)groups.push({key:'u:recent',label:'Recently Added',n:recent});
+  if(frequent)groups.push({key:'u:frequent',label:'Frequently Used',n:frequent});
+  return groups;
+}
+// Members of a smart group key, drawn from pub (+ adm when unlocked).
+function smartMembers(key){
+  const src=[...pub,...(auth?adm:[])];
+  const now=Date.now();
+  if(key==='u:recent')return src.filter(l=>l.createdAt&&now-l.createdAt<7*DAY).sort((a,b)=>b.createdAt-a.createdAt);
+  if(key==='u:frequent')return src.filter(l=>(l.openCount||0)>=3).sort((a,b)=>(b.openCount||0)-(a.openCount||0));
+  const cat=key.slice(2);
+  return src.filter(l=>smartCategory(l)===cat);
+}
+function smartLabel(key){
+  if(key==='u:recent')return 'Recently Added';
+  if(key==='u:frequent')return 'Frequently Used';
+  return key.slice(2);
+}
+// Turn a smart group into a real, editable collection by writing its category
+// into each member's manual `collection` field.
+async function smartToCollection(key){
+  const cat=smartLabel(key);
+  const members=smartMembers(key);
+  if(!members.length)return;
+  let touchedAdm=false;
+  for(const l of members){
+    l.collection=cat;l.updatedAt=Date.now();
+    if(pub.includes(l))await dbPut(STORE_PUB,l);else touchedAdm=true;
+  }
+  if(touchedAdm)await saveVault();
+  toast(`${members.length} link disimpan ke collection "${escHTML(cat)}"`,'ok');
+  setView('col',cat);
+}
+
 const IC={
   all:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>',
   fav:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
@@ -510,6 +586,7 @@ const IC={
   col:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
   lock:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
   unlock:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>',
+  smart:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.9 4.8L18.7 9l-4.8 1.9L12 15.7 10.1 10.9 5.3 9l4.8-1.2L12 3z"/><circle cx="18" cy="17" r="1.2"/><circle cx="6" cy="16" r="1"/></svg>',
 };
 
 function renderSidebar(){
@@ -523,6 +600,11 @@ function renderSidebar(){
   if(cols.length){
     h+=`<div class="sgroup">Collections</div>`;
     h+=cols.map(([c,n])=>`<button class="sitem${on('col',c)}" onclick="setView('col','${escJS(c)}')">${IC.col} ${escHTML(c)}<span class="cnt">${n}</span></button>`).join('');
+  }
+  const smart=smartGroups(auth?[...pub,...adm]:pub);
+  if(smart.length){
+    h+=`<div class="sgroup">Smart</div>`;
+    h+=smart.map(g=>`<button class="sitem${view.type==='smart'&&view.col===g.key?' on':''}" onclick="setView('smart','${escJS(g.key)}')">${IC.smart} ${escHTML(g.label)}<span class="cnt">${g.n}</span></button>`).join('');
   }
   h+=`<div class="sgroup">Vault</div>
   <button class="sitem${on('private')}" onclick="setView('private')">${auth?IC.unlock:IC.lock} Private Vault<span class="lockic" style="font-size:10px">${auth?'🔓':'🔒'}</span></button>`;
@@ -564,6 +646,13 @@ function render(){
     const l=[...pub,...(auth?adm:[])].filter(x=>x.collection===view.col);
     h+=head(view.col,`${l.length} links in this collection`);
     h+=l.length?grid(l,'mix',false):empty('Collection kosong','Tambahkan link ke collection ini lewat Edit.');
+  }else if(view.type==='smart'){
+    const l=smartMembers(view.col);
+    const label=smartLabel(view.col);
+    const isUsage=view.col.startsWith('u:');
+    h+=`<div class="greet au"><div><h1>✦ ${escHTML(label)}</h1><p>${l.length} link dikelompokkan otomatis${isUsage?' berdasarkan penggunaan':' berdasarkan domain'} — tidak mengubah collection manualmu</p></div>
+      <div class="actions">${isUsage||!l.length?'':`<button class="btnp btno" onclick="smartToCollection('${escJS(view.col)}')" title="Salin grup ini ke field collection tiap link">Simpan sebagai Collection</button>`}</div></div>`;
+    h+=l.length?grid(l,'mix',false):empty('Grup kosong','Belum ada link yang cocok dengan grup ini.');
   }else if(view.type==='private'){
     h+=`<div class="greet au"><div><h1>Private Vault 🔓</h1><p>${adm.length} private links — hanya di perangkat ini</p></div>
       <div class="actions">
@@ -881,6 +970,7 @@ function cpCommands(){
     {t:'Go to Recent',s:'view',ic:'◷',fn:()=>{closeCP();setView('rec')}},
   ];
   collections(auth?[...pub,...adm]:pub).forEach(([col])=>c.push({t:'Go to '+col,s:'collection',ic:'▤',fn:()=>{closeCP();setView('col',col)}}));
+  smartGroups(auth?[...pub,...adm]:pub).forEach(g=>c.push({t:'Smart: '+g.label,s:'smart group',ic:'✦',fn:()=>{closeCP();setView('smart',g.key)}}));
   return c;
 }
 function score(q,l){
