@@ -355,7 +355,9 @@ pre.code .k{color:#F92672}pre.code .s{color:#E6DB74}pre.code .t{color:#A78BFA}pr
 const DB_NAME='MWApp',DB_VER=2;
 const STORE_PUB='public',STORE_ADM='admin',STORE_META='meta';
 const K_PW='mwa_pw',K_GT='mwa_gt',K_GI='mwa_gi',K_THEME='mwa_theme',K_ACCENT='mwa_accent';
+const VAULT_KEY='vault',VAULT_ITER=600000;
 let db=null,pub=[],adm=[],auth=false,setCtx='pub';
+let vaultMeta=null,vaultKey=null,vaultPw=null,legacyAdm=[];
 let aeCtx='pub',aeId=null,genCtx='pub',lastGen='';
 let view={type:'all'};
 let healthCache={};
@@ -403,12 +405,42 @@ function openDB(){
   });
 }
 function dbPut(store,data){if(!db)return Promise.resolve(false);return new Promise(res=>{const tx=db.transaction(store,'readwrite');tx.objectStore(store).put(data);tx.oncomplete=()=>res(true);tx.onerror=()=>res(false)})}
+function dbGet(store,key){if(!db)return Promise.resolve(null);return new Promise(res=>{const r=db.transaction(store,'readonly').objectStore(store).get(key);r.onsuccess=()=>res(r.result||null);r.onerror=()=>res(null)})}
 function dbGetAll(store){if(!db)return Promise.resolve([]);return new Promise(res=>{const r=db.transaction(store,'readonly').objectStore(store).getAll();r.onsuccess=()=>res(r.result||[]);r.onerror=()=>res([])})}
 function dbDel(store,key){if(!db)return Promise.resolve();return new Promise(res=>{const tx=db.transaction(store,'readwrite');tx.objectStore(store).delete(key);tx.oncomplete=()=>res(true)})}
+function dbClear(store){if(!db)return Promise.resolve();return new Promise(res=>{const tx=db.transaction(store,'readwrite');tx.objectStore(store).clear();tx.oncomplete=()=>res(true)})}
 async function saveList(ctx){
-  const list=ctx==='pub'?pub:adm,store=ctx==='pub'?STORE_PUB:STORE_ADM;
-  list.forEach((l,i)=>l.order=i);
-  for(const x of list)await dbPut(store,x);
+  if(ctx==='pub'){pub.forEach((l,i)=>l.order=i);for(const x of pub)await dbPut(STORE_PUB,x)}
+  else{adm.forEach((l,i)=>l.order=i);await saveVault()}
+}
+// persist a single link mutation to the right backing store
+async function persist(ctx,item){if(ctx==='pub')await dbPut(STORE_PUB,item);else await saveVault()}
+
+// ═══ VAULT CRYPTO (PBKDF2 → AES-256-GCM) ═══
+// The private list is stored ONLY as one encrypted blob in the meta store.
+// STORE_ADM is kept solely as the migration source for pre-encryption data.
+const te_=new TextEncoder(),td_=new TextDecoder();
+function b64(buf){return btoa(String.fromCharCode(...new Uint8Array(buf)))}
+function unb64(s){return Uint8Array.from(atob(s),c=>c.charCodeAt(0))}
+function deriveKey(pw,salt,iter){
+  return crypto.subtle.importKey('raw',te_.encode(pw),'PBKDF2',false,['deriveKey'])
+    .then(base=>crypto.subtle.deriveKey({name:'PBKDF2',salt,iterations:iter,hash:'SHA-256'},base,{name:'AES-GCM',length:256},false,['encrypt','decrypt']));
+}
+async function encryptVault(list,key){
+  const iv=crypto.getRandomValues(new Uint8Array(12));
+  const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,te_.encode(JSON.stringify(list)));
+  return {iv:b64(iv),ct:b64(ct)};
+}
+async function decryptVault(blob,key){
+  const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv:unb64(blob.iv)},key,unb64(blob.ct));
+  return JSON.parse(td_.decode(pt));
+}
+async function saveVault(){
+  if(!vaultKey||!vaultMeta)return;
+  adm.forEach((l,i)=>l.order=i);
+  const blob=await encryptVault(adm,vaultKey);
+  vaultMeta={...vaultMeta,...blob,updatedAt:Date.now()};
+  await dbPut(STORE_META,vaultMeta);
 }
 
 // ═══ SERVICE WORKER (real file — works when served over http/https) ═══
@@ -441,16 +473,16 @@ function setAccent(a){
 async function loadData(){
   db=await openDB();
   pub=await dbGetAll(STORE_PUB);
-  adm=await dbGetAll(STORE_ADM);
   if(!pub.length){pub=JSON.parse(JSON.stringify(DEF_PUB))}
-  if(!adm.length){adm=JSON.parse(JSON.stringify(DEF_ADM))}
   // migrate v1 records → v2 fields
   let dirty=false;
   pub.forEach((l,i)=>{if(migrate(l,i))dirty=true});
-  adm.forEach((l,i)=>{if(migrate(l,i))dirty=true});
   pub.sort((a,b)=>a.order-b.order);
-  adm.sort((a,b)=>a.order-b.order);
-  if(dirty||!(await dbGetAll(STORE_PUB)).length){await saveList('pub');await saveList('adm')}
+  if(dirty)await saveList('pub');
+  // private list: encrypted blob only; plaintext STORE_ADM is just the legacy migration source
+  vaultMeta=await dbGet(STORE_META,VAULT_KEY);
+  legacyAdm=vaultMeta?[]:await dbGetAll(STORE_ADM);
+  adm=[];
   render();
   updateSyncDot();
   setTimeout(checkHealth,2500);
@@ -603,13 +635,13 @@ function findL(id,ctx){return (ctx==='pub'?pub:adm).find(x=>x.id===id)}
 async function openLink(id,ctx){
   const l=findL(id,ctx);if(!l)return;
   l.openCount=(l.openCount||0)+1;l.lastOpenedAt=Date.now();
-  await dbPut(ctx==='pub'?STORE_PUB:STORE_ADM,l);
+  await persist(ctx,l);
   window.open(l.u,'_blank','noopener');
 }
 async function toggleFav(id,ctx){
   const l=findL(id,ctx);if(!l)return;
   l.isFavorite=!l.isFavorite;l.updatedAt=Date.now();
-  await dbPut(ctx==='pub'?STORE_PUB:STORE_ADM,l);
+  await persist(ctx,l);
   render();
 }
 function copyUrl(id,ctx){
@@ -622,11 +654,11 @@ async function del(ctx,id){
   const list=ctx==='pub'?pub:adm;
   const idx=list.findIndex(x=>x.id===id);if(idx===-1)return;
   const [item]=list.splice(idx,1);
-  await dbDel(ctx==='pub'?STORE_PUB:STORE_ADM,id);
+  if(ctx==='pub')await dbDel(STORE_PUB,id);else await saveVault();
   render();
   toast(`Deleted "${escHTML(item.t)}"`,'inf',{label:'Undo',fn:async()=>{
     list.splice(Math.min(idx,list.length),0,item);
-    await dbPut(ctx==='pub'?STORE_PUB:STORE_ADM,item);
+    await persist(ctx,item);
     render();toast('Restored','ok');
   }});
 }
@@ -691,15 +723,15 @@ async function saveAE(){
     Object.assign(l,{t,u:url,f,collection:col,tags,notes,isFavorite:fav,updatedAt:now});
     if(targetCtx!==aeCtx){ // moved public↔private
       const i=oldList.indexOf(l);oldList.splice(i,1);
-      await dbDel(aeCtx==='pub'?STORE_PUB:STORE_ADM,l.id);
+      if(aeCtx==='pub')await dbDel(STORE_PUB,l.id);else await saveVault();
       (targetCtx==='pub'?pub:adm).push(l);
     }
-    await dbPut(targetCtx==='pub'?STORE_PUB:STORE_ADM,l);
+    await persist(targetCtx,l);
     toast('Updated','ok');
   }else{
     const n={id:newId(),t,u:url,f,collection:col,tags,notes,isFavorite:fav,openCount:0,lastOpenedAt:0,createdAt:now,updatedAt:now,order:(targetCtx==='pub'?pub:adm).length};
     (targetCtx==='pub'?pub:adm).push(n);
-    await dbPut(targetCtx==='pub'?STORE_PUB:STORE_ADM,n);
+    await persist(targetCtx,n);
     toast('Link added','ok');
   }
   cls('ae');render();
@@ -724,26 +756,68 @@ async function dp(e){
   await saveList(sCtx);render();
 }
 
-// ═══ PRIVATE VAULT ═══
+// ═══ PRIVATE VAULT (encrypted at rest) ═══
 function unlockHTML(){
-  const first=!localStorage.getItem(K_PW);
+  const legacy=!vaultMeta&&!!localStorage.getItem(K_PW);
+  const first=!vaultMeta&&!legacy;
+  const sub=first?'Buat password — vault akan dienkripsi':legacy?'Masukkan password lama — vault akan di-upgrade ke penyimpanan terenkripsi':'Locked • AES-256 encrypted';
+  const note=first||legacy
+    ?'🔐 Data dienkripsi AES-256-GCM (key diturunkan dari password via PBKDF2). <b>Password tidak dapat dipulihkan</b> — tanpa password, data vault tidak bisa dibuka.'
+    :'🔐 Encrypted at rest. Password tidak dapat dipulihkan.';
   return `<div class="unlock au">
     <div class="lockbig"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
     <h2>Private Vault</h2>
-    <p>${first?'Buat password untuk vault ini':'Locked • masukkan password'}</p>
-    <input type="password" id="pwi" placeholder="${first?'new password':'password'}" onkeydown="if(event.key==='Enter')chkPw()">
-    <button class="btnp btnw" style="margin-top:12px" onclick="chkPw()">${first?'Create & Unlock':'Unlock'}</button>
-    <p class="note">⚠ Ini privacy lock di sisi browser, <b>bukan enkripsi</b>. Jangan simpan data sensitif berat di sini (enkripsi menyusul di roadmap).</p>
+    <p>${sub}</p>
+    <input type="password" id="pwi" placeholder="${first?'new password':legacy?'password lama':'password'}" onkeydown="if(event.key==='Enter')chkPw()">
+    <button class="btnp btnw" style="margin-top:12px" onclick="chkPw()" id="pwbtn">${vaultMeta?'Unlock':'Create & Unlock'}</button>
+    <p class="note">${note}</p>
   </div>`;
 }
-function chkPw(){
+function pwFail(msg){
   const pwin=document.getElementById('pwi');
-  const v=pwin.value.trim();if(!v)return;
-  const sp=localStorage.getItem(K_PW);
-  if(!sp){localStorage.setItem(K_PW,v);grant()}
-  else if(v===sp)grant();
-  else{pwin.classList.add('sh');toast('Wrong password','er');setTimeout(()=>pwin.classList.remove('sh'),500)}
-  pwin.value='';
+  pwin.classList.add('sh');toast(msg,'er');
+  setTimeout(()=>pwin.classList.remove('sh'),500);
+  pwin.value='';pwin.focus();
+}
+async function chkPw(){
+  const pwin=document.getElementById('pwi');
+  const v=pwin.value;if(!v.trim())return;
+  if(!crypto||!crypto.subtle){toast('Browser tidak mendukung WebCrypto (butuh HTTPS)','er');return}
+  const btn=document.getElementById('pwbtn');btn.disabled=true;btn.textContent='Deriving key…';
+  try{
+    if(vaultMeta){
+      // existing encrypted vault
+      try{
+        const key=await deriveKey(v,unb64(vaultMeta.salt),vaultMeta.iter);
+        adm=await decryptVault(vaultMeta,key);
+        adm.forEach((l,i)=>migrate(l,i));
+        adm.sort((a,b)=>a.order-b.order);
+        vaultKey=key;vaultPw=v;
+        grant();
+      }catch{pwFail('Wrong password')}
+    }else{
+      // create new vault, or migrate legacy plaintext vault
+      const legacyPw=localStorage.getItem(K_PW);
+      if(legacyPw&&v!==legacyPw){pwFail('Password lama tidak cocok');return}
+      let source=legacyAdm.length?legacyAdm:JSON.parse(JSON.stringify(DEF_ADM));
+      source.forEach((l,i)=>migrate(l,i));
+      source.sort((a,b)=>a.order-b.order);
+      adm=source;
+      const salt=crypto.getRandomValues(new Uint8Array(16));
+      vaultKey=await deriveKey(v,salt,VAULT_ITER);
+      vaultPw=v;
+      vaultMeta={k:VAULT_KEY,v:2,salt:b64(salt),iter:VAULT_ITER};
+      await saveVault();
+      // wipe plaintext legacy data + old plaintext password
+      await dbClear(STORE_ADM);legacyAdm=[];
+      localStorage.removeItem(K_PW);
+      grant();
+      toast(legacyPw?'Vault di-upgrade: data kini terenkripsi':'Encrypted vault created','ok');
+    }
+  }finally{
+    const b=document.getElementById('pwbtn');
+    if(b){b.disabled=false}
+  }
 }
 function grant(){
   auth=true;resetAutoLock();
@@ -751,8 +825,7 @@ function grant(){
   fullConfetti();
 }
 function lockSess(){
-  auth=false;
-  if(view.type==='private'||view.type==='fav'||view.type==='rec')view={type:view.type==='private'?'private':view.type};
+  auth=false;vaultKey=null;vaultPw=null;adm=[];
   render();toast('Vault locked','inf');
 }
 // auto-lock after 10 min idle
@@ -987,12 +1060,13 @@ async function impFile(input){
   }
   imported=imported.filter(x=>x.u&&x.u!=='#');
   if(!imported.length){toast('No links found in file','er');return}
+  if(setCtx==='adm'&&!auth){toast('Unlock vault dulu untuk import ke Private','er');return}
   const list=setCtx==='pub'?pub:adm;
-  const store=setCtx==='pub'?STORE_PUB:STORE_ADM;
   let added=0;
   for(const item of imported){
-    if(!list.find(x=>normU(x.u)===normU(item.u))){item.order=list.length;list.push(item);await dbPut(store,item);added++}
+    if(!list.find(x=>normU(x.u)===normU(item.u))){item.order=list.length;list.push(item);if(setCtx==='pub')await dbPut(STORE_PUB,item);added++}
   }
+  if(setCtx==='adm')await saveVault();
   render();cls('ie');
   toast(`Imported ${added} links${added<imported.length?` (${imported.length-added} duplikat dilewati)`:''}`,'ok');
 }
@@ -1006,11 +1080,20 @@ function updateSyncDot(){
   d.querySelector('span').textContent=has?'Gist':'Local';
 }
 async function syncSave(ctx){
+  if(ctx==='adm'&&!auth){toast('Unlock vault dulu untuk sync Private','er');return}
   const t=document.getElementById('sgt').value.trim(),i=document.getElementById('sgi').value.trim();
   if(!t){toast('Enter GitHub token','er');return}
   localStorage.setItem(K_GT,t);localStorage.setItem(K_GI,i);
-  const list=ctx==='adm'?adm:pub;
-  const body={description:ctx==='adm'?'Masterweb Private Links':'Masterweb Public Links',public:false,files:{'aperture-links.json':{content:JSON.stringify(list,null,2)}}};
+  let files;
+  if(ctx==='adm'){
+    // upload ENCRYPTED envelope only — never plaintext private links to Gist
+    const blob=await encryptVault(adm,vaultKey);
+    const env={format:'mwa-vault-enc',v:2,salt:vaultMeta.salt,iter:vaultMeta.iter,iv:blob.iv,ct:blob.ct};
+    files={'aperture-vault.enc.json':{content:JSON.stringify(env,null,2)}};
+  }else{
+    files={'aperture-links.json':{content:JSON.stringify(pub,null,2)}};
+  }
+  const body={description:ctx==='adm'?'Masterweb Private Vault (encrypted)':'Masterweb Public Links',public:false,files};
   try{
     const r=await fetch(i?`https://api.github.com/gists/${i}`:'https://api.github.com/gists',{method:i?'PATCH':'POST',headers:{Authorization:`token ${t}`,Accept:'application/vnd.github.v3+json','Content-Type':'application/json'},body:JSON.stringify(body)});
     if(!r.ok){toast('Gist save failed — check token','er');return}
@@ -1021,6 +1104,7 @@ async function syncSave(ctx){
   }catch{toast('Gist save failed — network?','er')}
 }
 async function syncLoad(ctx){
+  if(ctx==='adm'&&!auth){toast('Unlock vault dulu untuk load ke Private','er');return}
   const t=document.getElementById('sgt').value.trim(),i=document.getElementById('sgi').value.trim();
   if(!t||!i){toast('Token + Gist ID required','er');return}
   localStorage.setItem(K_GT,t);localStorage.setItem(K_GI,i);
@@ -1028,15 +1112,26 @@ async function syncLoad(ctx){
     const r=await fetch(`https://api.github.com/gists/${i}`,{headers:{Authorization:`token ${t}`,Accept:'application/vnd.github.v3+json'}});
     if(!r.ok){toast('Failed to load Gist','er');return}
     const d=await r.json();
-    const c=d.files?.['aperture-links.json']?.content;
-    if(!c){toast('No data in Gist','er');return}
-    const loaded=JSON.parse(c);
+    let loaded;
+    if(ctx==='adm'){
+      const c=d.files?.['aperture-vault.enc.json']?.content;
+      if(!c){toast('Tidak ada vault terenkripsi di Gist ini','er');return}
+      let env;try{env=JSON.parse(c)}catch{toast('Format vault tidak dikenali','er');return}
+      try{
+        const key=await deriveKey(vaultPw,unb64(env.salt),env.iter);
+        loaded=await decryptVault(env,key);
+      }catch{toast('Gagal dekripsi — password remote vault berbeda?','er');return}
+    }else{
+      const c=d.files?.['aperture-links.json']?.content;
+      if(!c){toast('No data in Gist','er');return}
+      loaded=JSON.parse(c);
+    }
     if(!Array.isArray(loaded)){toast('Format Gist tidak dikenali','er');return}
     const list=ctx==='adm'?adm:pub;
     const {merged,addedN}=mergeLinks(list,loaded);
     // no silent overwrite: only ADD new records, never clear existing store first
-    if(ctx==='adm')adm=merged;else pub=merged;
-    for(const x of merged)await dbPut(ctx==='adm'?STORE_ADM:STORE_PUB,x);
+    if(ctx==='adm'){adm=merged;await saveVault()}
+    else{pub=merged;for(const x of merged)await dbPut(STORE_PUB,x)}
     updateSyncDot();
     render();toast(`Loaded: ${addedN} link baru digabung, data lokal tetap utuh`,'ok');
   }catch{toast('Failed to load Gist','er')}
@@ -1073,7 +1168,7 @@ function openSet(ctx){
     <div class="sr" onclick="cls('so');setTimeout(()=>gen(setCtx,null),250)"><div><p class="st">Generate HTML Dropdown</p><p class="sd">Self-contained HTML dengan dropdown menu</p></div></div>
     <div class="sr" onclick="cls('so');setTimeout(()=>openIE(setCtx),250)"><div><p class="st">Import / Export</p><p class="sd">JSON, CSV, atau Netscape Bookmark</p></div></div>
     <div class="sr" onclick="cls('so');checkHealth(false)"><div><p class="st">Check Link Health</p><p class="sd">Ping favicon tiap link (hasil: reachable / not verified)</p></div></div>`;
-  if(isAdm)h+=`<div class="sr" onclick="showChpw()"><div><p class="st">Change Vault Password</p><p class="sd">Privacy lock — bukan enkripsi</p></div></div>
+  if(isAdm)h+=`<div class="sr" onclick="showChpw()"><div><p class="st">Change Vault Password</p><p class="sd">Re-enkripsi vault dengan password baru (AES-256)</p></div></div>
     <div id="cpwF" style="display:none;border-radius:14px;border:1px solid var(--border);background:var(--surface);padding:14px;margin-bottom:8px">
       <div class="fd"><input type="password" id="cpwo" placeholder="Old password"></div>
       <div class="fd"><input type="password" id="cpwn" placeholder="New password"></div>
@@ -1082,7 +1177,7 @@ function openSet(ctx){
     </div>`;
   h+=`<div class="gp">
     <p style="font-size:13px;font-weight:600">GitHub Gist Sync <span class="mono" style="font-size:9px;color:var(--accent)">CROSS-DEVICE</span></p>
-    <p style="font-size:10px;color:var(--text-soft);margin-top:3px">Menyinkronkan list <b>${isAdm?'Private':'Public'}</b>. Load = merge (tidak menimpa data lokal). ⚠ Token tersimpan plaintext di browser ini.</p>
+    <p style="font-size:10px;color:var(--text-soft);margin-top:3px">Menyinkronkan list <b>${isAdm?'Private':'Public'}</b>. Load = merge (tidak menimpa data lokal). ${isAdm?'Vault diunggah <b>terenkripsi</b> (AES-256) — perlu password sama untuk load lintas perangkat.':''} ⚠ Token GitHub tersimpan plaintext di browser ini.</p>
     <div class="gg"><input class="ginp" type="password" id="sgt" placeholder="GitHub Token (gist scope)" value="${escAttr(gt)}"><input class="ginp" type="text" id="sgi" placeholder="Gist ID (auto on first save)" value="${escAttr(gi)}"></div>
     <div class="ga"><button class="btnp" style="padding:9px" onclick="syncSave('${ctx}')">Save to Gist</button><button class="btnp btno" style="padding:9px" onclick="syncLoad('${ctx}')">Load & Merge</button></div>
   </div>
@@ -1101,13 +1196,19 @@ function openSet(ctx){
   op('so');
 }
 function showChpw(){const f=document.getElementById('cpwF');f.style.display=f.style.display==='none'?'block':'none'}
-function doChpw(){
-  const o=document.getElementById('cpwo').value.trim(),n=document.getElementById('cpwn').value.trim(),c=document.getElementById('cpwc').value.trim();
+async function doChpw(){
+  const o=document.getElementById('cpwo').value,n=document.getElementById('cpwn').value,c=document.getElementById('cpwc').value;
   if(!o||!n){toast('Fill all fields','er');return}
   if(n!==c){toast('Passwords do not match','er');return}
-  const sp=localStorage.getItem(K_PW);
-  if(!sp||o!==sp){toast('Old password incorrect','er');return}
-  localStorage.setItem(K_PW,n);toast('Password changed','ok');
+  if(!auth||!vaultKey){toast('Unlock vault dulu','er');return}
+  if(o!==vaultPw){toast('Old password incorrect','er');return}
+  // re-key: fresh salt + new derived key, then re-encrypt vault
+  const salt=crypto.getRandomValues(new Uint8Array(16));
+  vaultKey=await deriveKey(n,salt,VAULT_ITER);
+  vaultPw=n;
+  vaultMeta={k:VAULT_KEY,v:2,salt:b64(salt),iter:VAULT_ITER};
+  await saveVault();
+  toast('Vault password changed & re-encrypted','ok');
   ['cpwo','cpwn','cpwc'].forEach(id=>document.getElementById(id).value='');
 }
 
