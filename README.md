@@ -7,6 +7,7 @@ Single-file link manager & start page. Buka `index.html` (atau host di GitHub Pa
 - **Dashboard ringkas** — greeting, Favorites, Recently opened, All Links
 - **Sidebar navigasi** — All Links, Favorites, Recent, Collections, Smart, Private Vault
 - **Smart Collections** — auto-grouping berdasarkan domain (Development, AI Tools, Design, dll) + bucket penggunaan (Recently Added, Frequently Used); grup dihitung otomatis dan tidak mengubah collection manual, tapi bisa disalin jadi collection editable dengan satu klik
+- **Session Launcher** — simpan paket link (mis. "Morning Work") dan buka semuanya sekaligus dari sidebar atau command palette; konfirmasi bila tab terlalu banyak; link private hanya ikut terbuka saat vault terbuka
 - **Command palette** — `Ctrl+K` / `/` : fuzzy search (judul, URL, domain, tag, collection) + perintah
 - **Quick add** — tekan `N`, paste URL, Enter; judul & favicon otomatis, cek duplikat
 - **Compact cards** — favicon, domain, collection chip, favorite star, quick actions saat hover
