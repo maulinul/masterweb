@@ -170,6 +170,23 @@ a{color:inherit;text-decoration:none}
 .cpe{padding:22px;text-align:center;font-size:12px;color:var(--muted)}
 .cpf{display:flex;gap:14px;padding:8px 14px;border-top:1px solid var(--border);font-size:10px;color:var(--muted)}
 
+/* Sidebar launch button */
+.slaunch{display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;color:var(--muted);margin-left:auto;flex-shrink:0;transition:all .15s}
+.slaunch:hover{background:var(--accent-soft);color:var(--accent)}
+.sitem:hover .slaunch{color:var(--text-soft)}
+
+/* Session picker */
+.sespick{max-height:44vh;overflow-y:auto;border:1px solid var(--border);border-radius:12px;padding:5px;background:var(--surface)}
+.seso{display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:9px;cursor:pointer;font-size:13px;transition:background .12s}
+.seso:hover{background:var(--accent-soft)}
+.seso.on{background:var(--accent-soft)}
+.seso input{width:auto;accent-color:var(--accent);flex-shrink:0}
+.seso .cf{border-radius:5px;object-fit:contain;flex-shrink:0}
+.sest{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sesd{font-family:'JetBrains Mono';font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sesgroup{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:10px 10px 4px}
+.sesnote{font-size:11px;color:var(--text-soft);padding:12px 10px;text-align:center}
+
 /* ═══════════════════════════════════════════
    MODALS
    ═══════════════════════════════════════════ */
@@ -343,6 +360,18 @@ pre.code .k{color:#F92672}pre.code .s{color:#E6DB74}pre.code .t{color:#A78BFA}pr
   </div>
 </div>
 
+<!-- ═══ SESSION EDITOR MODAL ═══ -->
+<div class="mo" id="ses">
+  <div class="mm">
+    <button class="mc" onclick="cls('ses')"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    <h2 id="sesTitle">New Session</h2>
+    <div class="fd"><label>Nama session</label><input type="text" id="sesName" placeholder="e.g. Morning Work" onkeydown="if(event.key==='Enter')saveSession()"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin:8px 0 6px"><label style="font-size:11px;font-weight:600;color:var(--text-soft)">Pilih link</label><span id="sesCount" style="font-size:11px;color:var(--muted)">0 dipilih</span></div>
+    <div id="sesPick" class="sespick"></div>
+    <button class="btnp btnw" onclick="saveSession()" style="margin-top:12px">Save Session</button>
+  </div>
+</div>
+
 <script>
 /* ═══════════════════════════════════════════════════════════════════════════
    MASTER WEB APP — COMMAND CENTER (v2)
@@ -355,12 +384,13 @@ pre.code .k{color:#F92672}pre.code .s{color:#E6DB74}pre.code .t{color:#A78BFA}pr
 const DB_NAME='MWApp',DB_VER=2;
 const STORE_PUB='public',STORE_ADM='admin',STORE_META='meta';
 const K_PW='mwa_pw',K_GT='mwa_gt',K_GI='mwa_gi',K_THEME='mwa_theme',K_ACCENT='mwa_accent';
-const VAULT_KEY='vault',VAULT_ITER=600000;
+const VAULT_KEY='vault',VAULT_ITER=600000,SESS_KEY='sessions',LAUNCH_WARN=7;
 let db=null,pub=[],adm=[],auth=false,setCtx='pub';
 let vaultMeta=null,vaultKey=null,vaultPw=null,legacyAdm=[];
 let aeCtx='pub',aeId=null,genCtx='pub',lastGen='';
 let view={type:'all'};
 let healthCache={};
+let sessions=[],sessEditId=null,sessPick=new Set();
 
 const DEF_PUB=[
   {id:'p1',t:'GitHub',u:'https://github.com',f:'https://github.com/favicon.ico',collection:'Development'},
@@ -483,6 +513,8 @@ async function loadData(){
   vaultMeta=await dbGet(STORE_META,VAULT_KEY);
   legacyAdm=vaultMeta?[]:await dbGetAll(STORE_ADM);
   adm=[];
+  const sessRec=await dbGet(STORE_META,SESS_KEY);
+  sessions=sessRec&&Array.isArray(sessRec.list)?sessRec.list:[];
   render();
   updateSyncDot();
   setTimeout(checkHealth,2500);
@@ -587,7 +619,98 @@ const IC={
   lock:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
   unlock:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>',
   smart:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.9 4.8L18.7 9l-4.8 1.9L12 15.7 10.1 10.9 5.3 9l4.8-1.2L12 3z"/><circle cx="18" cy="17" r="1.2"/><circle cx="6" cy="16" r="1"/></svg>',
+  sess:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v12H4z" rx="2"/><path d="M2 20h20"/><path d="M9 9l3 2-3 2"/></svg>',
+  play:'<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg>',
 };
+
+// ═══ SESSION LAUNCHER — saved packages of links opened in one click ═══
+// session: {id,name,items:[{ctx,id}],createdAt,updatedAt}
+async function saveSessions(){await dbPut(STORE_META,{k:SESS_KEY,list:sessions})}
+function findSession(id){return sessions.find(s=>s.id===id)}
+// Resolve an item ref to its live link (null if missing or private-and-locked).
+function resolveItem(it){
+  if(it.ctx==='adm'){return auth?adm.find(l=>l.id===it.id)||null:null}
+  return pub.find(l=>l.id===it.id)||null;
+}
+function sessionStats(s){
+  let total=0,locked=0,missing=0;
+  s.items.forEach(it=>{
+    if(it.ctx==='adm'&&!auth){locked++;total++;return}
+    const l=resolveItem(it);
+    if(l)total++;else missing++;
+  });
+  return {total,locked,missing};
+}
+async function launchSession(id){
+  const s=findSession(id);if(!s)return;
+  const urls=[];let locked=0;
+  s.items.forEach(it=>{
+    if(it.ctx==='adm'&&!auth){locked++;return}
+    const l=resolveItem(it);if(l)urls.push(l.u);
+  });
+  if(!urls.length){toast(locked?'Unlock vault dulu untuk membuka link private':'Session kosong','er');return}
+  if(urls.length>LAUNCH_WARN&&!confirm(`Buka ${urls.length} tab sekaligus?`))return;
+  // mark usage + open each in a new tab (from the click gesture)
+  for(const it of s.items){const l=resolveItem(it);if(l){l.openCount=(l.openCount||0)+1;l.lastOpenedAt=Date.now()}}
+  for(const l of pub)if(s.items.some(it=>it.ctx==='pub'&&it.id===l.id))await dbPut(STORE_PUB,l);
+  if(auth&&s.items.some(it=>it.ctx==='adm'))await saveVault();
+  let blocked=0;
+  urls.forEach(u=>{const w=window.open(u,'_blank','noopener');if(!w)blocked++});
+  if(blocked)toast(`${urls.length-blocked} tab dibuka • ${blocked} diblokir browser (izinkan popup)`,'inf');
+  else toast(`Launched ${urls.length} tab${locked?` • ${locked} private dilewati (locked)`:''}`,'ok');
+}
+// ── editor ──
+function openSessionEditor(id){
+  closeMenu();
+  sessEditId=id;
+  const s=id?findSession(id):null;
+  sessPick=new Set(s?s.items.map(it=>it.ctx+':'+it.id):[]);
+  document.getElementById('sesTitle').textContent=id?'Edit Session':'New Session';
+  document.getElementById('sesName').value=s?s.name:'';
+  renderSessPick();
+  op('ses');
+  setTimeout(()=>document.getElementById('sesName').focus(),150);
+}
+function toggleSessPick(k){sessPick.has(k)?sessPick.delete(k):sessPick.add(k);renderSessPick()}
+function renderSessPick(){
+  const wrap=document.getElementById('sesPick');
+  const rowsFor=(list,ctx)=>list.map(l=>{
+    const k=ctx+':'+l.id;const on=sessPick.has(k);
+    return `<label class="seso${on?' on':''}"><input type="checkbox" ${on?'checked':''} onchange="toggleSessPick('${k}')">
+      <img class="cf" style="width:20px;height:20px" src="${escAttr(l.f||'')}" onerror="this.style.visibility='hidden'">
+      <span class="sest">${escHTML(l.t)}</span><span class="sesd">${escHTML(domainOf(l.u))}</span>${ctx==='adm'?'<span class="chip" style="background:rgba(244,63,94,.12);color:var(--bad);margin-left:auto">🔒</span>':''}</label>`;
+  }).join('');
+  let h=rowsFor(pub,'pub');
+  if(auth&&adm.length)h+=`<div class="sesgroup">Private</div>`+rowsFor(adm,'adm');
+  else if(!auth)h+=`<div class="sesnote">🔒 Unlock Private Vault untuk menambahkan link private ke session.</div>`;
+  document.getElementById('sesCount').textContent=sessPick.size+' dipilih';
+  wrap.innerHTML=h||'<div class="sesnote">Belum ada link. Tambah link dulu.</div>';
+}
+async function saveSession(){
+  const name=document.getElementById('sesName').value.trim();
+  if(!name){toast('Beri nama session','er');return}
+  if(!sessPick.size){toast('Pilih minimal satu link','er');return}
+  const items=[...sessPick].map(k=>{const i=k.indexOf(':');return {ctx:k.slice(0,i),id:k.slice(i+1)}});
+  const now=Date.now();
+  if(sessEditId){
+    const s=findSession(sessEditId);if(s){s.name=name;s.items=items;s.updatedAt=now}
+  }else{
+    sessions.push({id:'s'+now.toString(36)+Math.random().toString(36).slice(2,5),name,items,createdAt:now,updatedAt:now});
+  }
+  await saveSessions();
+  cls('ses');
+  setView('session',sessEditId||sessions[sessions.length-1].id);
+  toast(sessEditId?'Session updated':'Session created','ok');
+}
+async function delSession(id){
+  const s=findSession(id);if(!s)return;
+  const idx=sessions.indexOf(s);
+  sessions.splice(idx,1);await saveSessions();
+  if(view.type==='session'&&view.col===id)setView('all');else render();
+  toast(`Session "${escHTML(s.name)}" dihapus`,'inf',{label:'Undo',fn:async()=>{
+    sessions.splice(Math.min(idx,sessions.length),0,s);await saveSessions();render();toast('Restored','ok');
+  }});
+}
 
 function renderSidebar(){
   const sb=document.getElementById('sidebar');
@@ -606,6 +729,9 @@ function renderSidebar(){
     h+=`<div class="sgroup">Smart</div>`;
     h+=smart.map(g=>`<button class="sitem${view.type==='smart'&&view.col===g.key?' on':''}" onclick="setView('smart','${escJS(g.key)}')">${IC.smart} ${escHTML(g.label)}<span class="cnt">${g.n}</span></button>`).join('');
   }
+  h+=`<div class="sgroup">Sessions</div>`;
+  h+=sessions.map(s=>`<button class="sitem${view.type==='session'&&view.col===s.id?' on':''}" onclick="setView('session','${escJS(s.id)}')">${IC.sess} <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHTML(s.name)}</span><span class="slaunch" title="Launch" onclick="event.stopPropagation();launchSession('${escJS(s.id)}')">${IC.play}</span></button>`).join('');
+  h+=`<button class="sitem" onclick="openSessionEditor(null)" style="color:var(--accent)"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> New Session</button>`;
   h+=`<div class="sgroup">Vault</div>
   <button class="sitem${on('private')}" onclick="setView('private')">${auth?IC.unlock:IC.lock} Private Vault<span class="lockic" style="font-size:10px">${auth?'🔓':'🔒'}</span></button>`;
   if(auth)h+=`<button class="sitem" onclick="lockSess()" style="color:var(--bad)">${IC.lock} Lock now</button>`;
@@ -653,10 +779,27 @@ function render(){
     h+=`<div class="greet au"><div><h1>✦ ${escHTML(label)}</h1><p>${l.length} link dikelompokkan otomatis${isUsage?' berdasarkan penggunaan':' berdasarkan domain'} — tidak mengubah collection manualmu</p></div>
       <div class="actions">${isUsage||!l.length?'':`<button class="btnp btno" onclick="smartToCollection('${escJS(view.col)}')" title="Salin grup ini ke field collection tiap link">Simpan sebagai Collection</button>`}</div></div>`;
     h+=l.length?grid(l,'mix',false):empty('Grup kosong','Belum ada link yang cocok dengan grup ini.');
+  }else if(view.type==='session'){
+    const s=findSession(view.col);
+    if(!s){h+=empty('Session tidak ditemukan','Session mungkin sudah dihapus.')}
+    else{
+      const st=sessionStats(s);
+      const resolved=s.items.map(it=>({it,l:resolveItem(it)}));
+      h+=`<div class="greet au"><div><h1>${IC.sess} ${escHTML(s.name)}</h1><p>${st.total} link${st.locked?` • ${st.locked} private (locked)`:''}${st.missing?` • ${st.missing} hilang`:''}</p></div>
+        <div class="actions">
+          <button class="btnp btno" onclick="openSessionEditor('${escJS(s.id)}')">Edit</button>
+          <button class="btnp btno" onclick="delSession('${escJS(s.id)}')" title="Delete session" style="border-color:rgba(244,63,94,.3);color:var(--bad)">Delete</button>
+          <button class="btnp" onclick="launchSession('${escJS(s.id)}')">${IC.play} Launch ${st.total} tab</button>
+        </div></div>`;
+      if(st.locked)h+=`<div class="es" style="padding:14px;margin-bottom:12px;text-align:left"><p>🔒 ${st.locked} link private dalam session ini — <b onclick="setView('private')" style="cursor:pointer;color:var(--accent)">unlock vault</b> untuk menyertakannya saat launch.</p></div>`;
+      const live=resolved.filter(r=>r.l).map(r=>r.l);
+      h+=live.length?grid(live,'mix',false):empty('Tidak ada link yang bisa dibuka','Edit session atau unlock vault.');
+    }
   }else if(view.type==='private'){
     h+=`<div class="greet au"><div><h1>Private Vault 🔓</h1><p>${adm.length} private links — hanya di perangkat ini</p></div>
       <div class="actions">
         <button class="btnp btno" onclick="openSet('adm')">Vault Settings</button>
+        <button class="btnp btno" onclick="openSessionEditor(null)">New Session</button>
         <button class="btnp" onclick="ed('adm',null)">+ Add Private</button>
       </div></div>`;
     h+=grid(adm,'adm',true);
@@ -969,6 +1112,8 @@ function cpCommands(){
     {t:'Go to Favorites',s:'view',ic:'★',fn:()=>{closeCP();setView('fav')}},
     {t:'Go to Recent',s:'view',ic:'◷',fn:()=>{closeCP();setView('rec')}},
   ];
+  c.push({t:'New session',s:'command',ic:'▶',fn:()=>{closeCP();openSessionEditor(null)}});
+  sessions.forEach(s=>c.push({t:'Launch '+s.name,s:'session',ic:'▶',fn:()=>{closeCP();launchSession(s.id)}}));
   collections(auth?[...pub,...adm]:pub).forEach(([col])=>c.push({t:'Go to '+col,s:'collection',ic:'▤',fn:()=>{closeCP();setView('col',col)}}));
   smartGroups(auth?[...pub,...adm]:pub).forEach(g=>c.push({t:'Smart: '+g.label,s:'smart group',ic:'✦',fn:()=>{closeCP();setView('smart',g.key)}}));
   return c;
