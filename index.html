@@ -294,6 +294,7 @@ pre.code .k{color:#F92672}pre.code .s{color:#E6DB74}pre.code .t{color:#A78BFA}pr
   <button class="bbb" onclick="bulkVisibility(event)" title="Ubah visibility">🔒 Visibility</button>
   <button class="bbb" onclick="bulkHealth()" title="Cek health link terpilih">♥ Health</button>
   <button class="bbb" onclick="bulkExport()" title="Export JSON">⇩ Export</button>
+  <button class="bbb" onclick="bulkArchive()" title="Arsipkan">⬇ Archive</button>
   <span class="bbsep"></span>
   <button class="bbb danger" onclick="bulkDelete()">Delete</button>
   <button class="bbb" onclick="clearSel()" title="Batal (Esc)">✕</button>
@@ -340,6 +341,7 @@ pre.code .k{color:#F92672}pre.code .s{color:#E6DB74}pre.code .t{color:#A78BFA}pr
     <h2 id="aet">Add Link</h2>
     <div class="fd"><label>URL</label><input type="url" id="aeu" placeholder="Paste a URL and press Enter" onkeydown="if(event.key==='Enter')saveAE()" oninput="aeUrlHint()"></div>
     <div id="aehint" style="font-size:11px;color:var(--muted);margin:-5px 0 10px;min-height:14px"></div>
+    <div style="font-size:10px;color:var(--muted);margin:-4px 0 8px">💡 Paste beberapa URL sekaligus (satu per baris) untuk bulk add</div>
     <button class="moreopts" onclick="toggleAEMore()" id="aemoreb">More options ▾</button>
     <div id="aemore" style="display:none">
       <div class="fd"><label>Title</label><input type="text" id="aetit" placeholder="Auto-detected from domain"></div>
@@ -445,10 +447,14 @@ function migrate(l,i){
   const def=(k,v)=>{if(l[k]===undefined){l[k]=v;ch=true}};
   def('isFavorite',false);def('collection','');def('tags',[]);def('notes','');
   def('openCount',0);def('lastOpenedAt',0);def('createdAt',Date.now());def('updatedAt',Date.now());
+  def('archived',false);def('trashedAt',0);
   if(l.order===undefined){l.order=i;ch=true}
   return ch;
 }
 function newId(){return 'x'+Date.now().toString(36)+Math.random().toString(36).slice(2,6)}
+const TRASH_TTL=30*86400000; // auto-delete after 30 days in trash
+function isActive(l){return !l.archived&&!l.trashedAt}
+const act=list=>list.filter(isActive);
 function normU(u){try{const o=new URL(u);return (o.origin+o.pathname.replace(/\/+$/,'')+o.search).toLowerCase()}catch{return (u||'').toLowerCase()}}
 function domainOf(u){try{return new URL(u).hostname.replace(/^www\./,'')}catch{return u}}
 
@@ -539,6 +545,10 @@ async function loadData(){
   // migrate v1 records → v2 fields
   let dirty=false;
   pub.forEach((l,i)=>{if(migrate(l,i))dirty=true});
+  // auto-purge: permanently drop items trashed more than 30 days ago
+  const cutoff=Date.now()-TRASH_TTL;
+  const expired=pub.filter(l=>l.trashedAt&&l.trashedAt<cutoff);
+  for(const l of expired){pub.splice(pub.indexOf(l),1);await dbDel(STORE_PUB,l.id)}
   pub.sort((a,b)=>a.order-b.order);
   if(dirty)await saveList('pub');
   // private list: encrypted blob only; plaintext STORE_ADM is just the legacy migration source
@@ -615,7 +625,7 @@ function smartGroups(list){
 }
 // Members of a smart group key, drawn from pub (+ adm when unlocked).
 function smartMembers(key){
-  const src=[...pub,...(auth?adm:[])];
+  const src=act([...pub,...(auth?adm:[])]);
   const now=Date.now();
   if(key==='u:recent')return src.filter(l=>l.createdAt&&now-l.createdAt<7*DAY).sort((a,b)=>b.createdAt-a.createdAt);
   if(key==='u:frequent')return src.filter(l=>(l.openCount||0)>=3).sort((a,b)=>(b.openCount||0)-(a.openCount||0));
@@ -652,6 +662,8 @@ const IC={
   unlock:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg>',
   smart:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l1.9 4.8L18.7 9l-4.8 1.9L12 15.7 10.1 10.9 5.3 9l4.8-1.2L12 3z"/><circle cx="18" cy="17" r="1.2"/><circle cx="6" cy="16" r="1"/></svg>',
   sess:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v12H4z" rx="2"/><path d="M2 20h20"/><path d="M9 9l3 2-3 2"/></svg>',
+  arch:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>',
+  trash:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
   play:'<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 4 20 12 6 20 6 4"/></svg>',
 };
 
@@ -661,8 +673,8 @@ async function saveSessions(){await dbPut(STORE_META,{k:SESS_KEY,list:sessions})
 function findSession(id){return sessions.find(s=>s.id===id)}
 // Resolve an item ref to its live link (null if missing or private-and-locked).
 function resolveItem(it){
-  if(it.ctx==='adm'){return auth?adm.find(l=>l.id===it.id)||null:null}
-  return pub.find(l=>l.id===it.id)||null;
+  const l=it.ctx==='adm'?(auth?adm.find(x=>x.id===it.id):null):pub.find(x=>x.id===it.id);
+  return l&&!l.trashedAt?l:null; // trashed links drop out of sessions
 }
 function sessionStats(s){
   let total=0,locked=0,missing=0;
@@ -712,8 +724,8 @@ function renderSessPick(){
       <img class="cf" style="width:20px;height:20px" src="${escAttr(l.f||'')}" onerror="this.style.visibility='hidden'">
       <span class="sest">${escHTML(l.t)}</span><span class="sesd">${escHTML(domainOf(l.u))}</span>${ctx==='adm'?'<span class="chip" style="background:rgba(244,63,94,.12);color:var(--bad);margin-left:auto">🔒</span>':''}</label>`;
   }).join('');
-  let h=rowsFor(pub,'pub');
-  if(auth&&adm.length)h+=`<div class="sesgroup">Private</div>`+rowsFor(adm,'adm');
+  let h=rowsFor(act(pub),'pub');
+  if(auth&&act(adm).length)h+=`<div class="sesgroup">Private</div>`+rowsFor(act(adm),'adm');
   else if(!auth)h+=`<div class="sesnote">🔒 Unlock Private Vault untuk menambahkan link private ke session.</div>`;
   document.getElementById('sesCount').textContent=sessPick.size+' dipilih';
   wrap.innerHTML=h||'<div class="sesnote">Belum ada link. Tambah link dulu.</div>';
@@ -747,19 +759,28 @@ async function delSession(id){
 function renderSidebar(){
   const sb=document.getElementById('sidebar');
   const on=(t,c)=>view.type===t&&(t!=='col'||view.col===c)?' on':'';
-  const favN=pub.filter(l=>l.isFavorite).length+(auth?adm.filter(l=>l.isFavorite).length:0);
-  let h=`<button class="sitem${on('all')}" onclick="setView('all')">${IC.all} All Links<span class="cnt">${pub.length}</span></button>
+  const src=act(auth?[...pub,...adm]:pub);
+  const favN=src.filter(l=>l.isFavorite).length;
+  let h=`<button class="sitem${on('all')}" onclick="setView('all')">${IC.all} All Links<span class="cnt">${act(pub).length}</span></button>
   <button class="sitem${on('fav')}" onclick="setView('fav')">${IC.fav} Favorites<span class="cnt">${favN}</span></button>
   <button class="sitem${on('rec')}" onclick="setView('rec')">${IC.rec} Recent</button>`;
-  const cols=collections(auth?[...pub,...adm]:pub);
+  const cols=collections(src);
   if(cols.length){
     h+=`<div class="sgroup">Collections</div>`;
     h+=cols.map(([c,n])=>`<button class="sitem${on('col',c)}" onclick="setView('col','${escJS(c)}')">${IC.col} ${escHTML(c)}<span class="cnt">${n}</span></button>`).join('');
   }
-  const smart=smartGroups(auth?[...pub,...adm]:pub);
+  const smart=smartGroups(src);
   if(smart.length){
     h+=`<div class="sgroup">Smart</div>`;
     h+=smart.map(g=>`<button class="sitem${view.type==='smart'&&view.col===g.key?' on':''}" onclick="setView('smart','${escJS(g.key)}')">${IC.smart} ${escHTML(g.label)}<span class="cnt">${g.n}</span></button>`).join('');
+  }
+  const allSrc=[...pub,...(auth?adm:[])];
+  const archN=allSrc.filter(l=>l.archived&&!l.trashedAt).length;
+  const trashN=allSrc.filter(l=>l.trashedAt).length;
+  if(archN||trashN){
+    h+=`<div class="sgroup">Library</div>`;
+    if(archN)h+=`<button class="sitem${on('archive')}" onclick="setView('archive')">${IC.arch} Archive<span class="cnt">${archN}</span></button>`;
+    if(trashN)h+=`<button class="sitem${on('trash')}" onclick="setView('trash')">${IC.trash} Trash<span class="cnt">${trashN}</span></button>`;
   }
   h+=`<div class="sgroup">Sessions</div>`;
   h+=sessions.map(s=>`<button class="sitem${view.type==='session'&&view.col===s.id?' on':''}" onclick="setView('session','${escJS(s.id)}')">${IC.sess} <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHTML(s.name)}</span><span class="slaunch" title="Launch" onclick="event.stopPropagation();launchSession('${escJS(s.id)}')">${IC.play}</span></button>`).join('');
@@ -780,30 +801,37 @@ function render(){
   const m=document.getElementById('main');
   if(view.type==='private'&&!auth){m.innerHTML=unlockHTML();const pi=document.getElementById('pwi');if(pi)pi.focus();return}
   let h='';
-  const list=view.type==='private'?adm:pub;
-  const ctx=view.type==='private'?'adm':'pub';
-  const total=pub.length+(auth?adm.length:0);
-  const favN=list.filter(l=>l.isFavorite).length;
+  const aPub=act(pub),aAdm=act(adm);
+  const total=aPub.length+(auth?aAdm.length:0);
   if(view.type==='all'){
-    h+=`<div class="greet au"><div><h1>${greeting()}</h1><p>${total} links • ${favN} favorites</p></div>
+    h+=`<div class="greet au"><div><h1>${greeting()}</h1><p>${total} links • ${aPub.filter(l=>l.isFavorite).length} favorites</p></div>
       <div class="actions"><button class="btnp" onclick="ed('pub',null)">+ Add Link <span class="kbd" style="background:rgba(255,255,255,.15);border-color:transparent;color:#fff">N</span></button></div></div>`;
-    const favs=pub.filter(l=>l.isFavorite);
+    const favs=aPub.filter(l=>l.isFavorite);
     if(favs.length){h+=sech('Favorites','setView(\'fav\')');h+=grid(favs,'pub',false)}
-    const rec=pub.filter(l=>l.lastOpenedAt).sort((a,b)=>b.lastOpenedAt-a.lastOpenedAt).slice(0,6);
+    const rec=aPub.filter(l=>l.lastOpenedAt).sort((a,b)=>b.lastOpenedAt-a.lastOpenedAt).slice(0,6);
     if(rec.length){h+=sech('Recently opened','setView(\'rec\')');h+=grid(rec,'pub',false)}
-    h+=sech('All links');h+=grid(pub,'pub',true);
+    h+=sech('All links');h+=grid(aPub,'pub',true);
   }else if(view.type==='fav'){
-    const l=[...pub.filter(x=>x.isFavorite),...(auth?adm.filter(x=>x.isFavorite):[])];
+    const l=[...aPub.filter(x=>x.isFavorite),...(auth?aAdm.filter(x=>x.isFavorite):[])];
     h+=head('Favorites',`${l.length} starred links`);
     h+=l.length?grid(l,'mix',false):empty('Belum ada Favorites','Klik ikon ★ pada link apa pun agar muncul di sini.');
   }else if(view.type==='rec'){
-    const l=[...pub,...(auth?adm:[])].filter(x=>x.lastOpenedAt).sort((a,b)=>b.lastOpenedAt-a.lastOpenedAt);
+    const l=[...aPub,...(auth?aAdm:[])].filter(x=>x.lastOpenedAt).sort((a,b)=>b.lastOpenedAt-a.lastOpenedAt);
     h+=head('Recently opened',`${l.length} links tracked`);
     h+=l.length?grid(l,'mix',false):empty('Belum ada riwayat','Buka link apa pun — riwayat tercatat otomatis.');
   }else if(view.type==='col'){
-    const l=[...pub,...(auth?adm:[])].filter(x=>x.collection===view.col);
+    const l=[...aPub,...(auth?aAdm:[])].filter(x=>x.collection===view.col);
     h+=head(view.col,`${l.length} links in this collection`);
     h+=l.length?grid(l,'mix',false):empty('Collection kosong','Tambahkan link ke collection ini lewat Edit.');
+  }else if(view.type==='archive'){
+    const l=[...pub,...(auth?adm:[])].filter(x=>x.archived&&!x.trashedAt);
+    h+=`<div class="greet au"><div><h1>${IC.arch} Archive</h1><p>${l.length} link diarsipkan — tidak tampil di view utama</p></div><div class="actions"></div></div>`;
+    h+=l.length?grid(l,'mix',false):empty('Archive kosong','Arsipkan link lewat menu ⋯ pada card.');
+  }else if(view.type==='trash'){
+    const l=[...pub,...(auth?adm:[])].filter(x=>x.trashedAt).sort((a,b)=>b.trashedAt-a.trashedAt);
+    h+=`<div class="greet au"><div><h1>${IC.trash} Trash</h1><p>${l.length} link — otomatis terhapus permanen setelah 30 hari</p></div>
+      <div class="actions">${l.length?`<button class="btnp btno" onclick="emptyTrash()" style="border-color:rgba(244,63,94,.3);color:var(--bad)">Empty Trash</button>`:''}</div></div>`;
+    h+=l.length?grid(l,'mix',false):empty('Trash kosong','Link yang dihapus mampir ke sini dulu sebelum hilang permanen.');
   }else if(view.type==='smart'){
     const l=smartMembers(view.col);
     const label=smartLabel(view.col);
@@ -828,13 +856,13 @@ function render(){
       h+=live.length?grid(live,'mix',false):empty('Tidak ada link yang bisa dibuka','Edit session atau unlock vault.');
     }
   }else if(view.type==='private'){
-    h+=`<div class="greet au"><div><h1>Private Vault 🔓</h1><p>${adm.length} private links — hanya di perangkat ini</p></div>
+    h+=`<div class="greet au"><div><h1>Private Vault 🔓</h1><p>${aAdm.length} private links — hanya di perangkat ini</p></div>
       <div class="actions">
         <button class="btnp btno" onclick="openSet('adm')">Vault Settings</button>
         <button class="btnp btno" onclick="openSessionEditor(null)">New Session</button>
         <button class="btnp" onclick="ed('adm',null)">+ Add Private</button>
       </div></div>`;
-    h+=grid(adm,'adm',true);
+    h+=grid(aAdm,'adm',true);
   }
   m.innerHTML=h;
 }
@@ -869,6 +897,7 @@ function cardHTML(l,i,ctx,draggable){
     <div class="cmeta">
       ${l.collection?`<span class="chip">${escHTML(l.collection)}</span>`:''}
       ${ctx==='adm'?'<span class="chip" style="background:rgba(244,63,94,.12);color:var(--bad)">🔒</span>':''}
+      ${l.trashedAt?`<span class="chip" style="background:rgba(244,63,94,.12);color:var(--bad)">🗑 ${Math.max(0,Math.ceil((l.trashedAt+TRASH_TTL-Date.now())/86400000))}d</span>`:l.archived?'<span class="chip" style="background:rgba(245,158,11,.12);color:var(--warn)">⬇ archived</span>':''}
       <span class="hdot ${hc}" title="${htit}"></span>
     </div>
     <div class="ca" onclick="event.stopPropagation()">
@@ -884,12 +913,21 @@ let menuEl=null;
 function closeMenu(){if(menuEl){menuEl.remove();menuEl=null}}
 function moreMenu(e,id,ctx){
   e.stopPropagation();closeMenu();
+  const l=findL(id,ctx);if(!l)return;
   const d=document.createElement('div');d.className='cmenu';
-  d.innerHTML=`
-    <button onclick="openLink('${id}','${ctx}');closeMenu()">Open in new tab</button>
-    <button onclick="gen('${ctx}','${id}');closeMenu()">Generate HTML</button>
-    <div class="sep"></div>
-    <button class="danger" onclick="del('${ctx}','${id}');closeMenu()">Delete</button>`;
+  let items='';
+  if(l.trashedAt){
+    items=`<button onclick="restoreLink('${ctx}','${id}');closeMenu()">↩ Restore</button>
+      <div class="sep"></div>
+      <button class="danger" onclick="permaDel('${ctx}','${id}');closeMenu()">Delete permanently</button>`;
+  }else{
+    items=`<button onclick="openLink('${id}','${ctx}');closeMenu()">Open in new tab</button>
+      <button onclick="gen('${ctx}','${id}');closeMenu()">Generate HTML</button>
+      <button onclick="${l.archived?`unarchiveLink('${ctx}','${id}')`:`archiveLink('${ctx}','${id}')`};closeMenu()">${l.archived?'↩ Unarchive':'⬇ Archive'}</button>
+      <div class="sep"></div>
+      <button class="danger" onclick="del('${ctx}','${id}');closeMenu()">Move to Trash</button>`;
+  }
+  d.innerHTML=items;
   document.body.appendChild(d);
   const r=d.getBoundingClientRect();
   d.style.left=Math.min(e.clientX,window.innerWidth-r.width-10)+'px';
@@ -917,17 +955,70 @@ function copyUrl(id,ctx){
   navigator.clipboard.writeText(l.u).then(()=>toast('URL copied','ok')).catch(()=>fallbackCopy(l.u));
 }
 
-// ═══ DELETE + UNDO ═══
+// ═══ ARCHIVE / TRASH / DELETE + UNDO ═══
+// Delete is soft: link moves to Trash, auto-purged after 30 days.
 async function del(ctx,id){
+  const l=findL(id,ctx);if(!l)return;
+  l.trashedAt=Date.now();l.updatedAt=Date.now();
+  await persist(ctx,l);
+  render();
+  toast(`"${escHTML(l.t)}" → Trash`,'inf',{label:'Undo',fn:async()=>{
+    l.trashedAt=0;await persist(ctx,l);render();toast('Restored','ok');
+  }});
+}
+async function restoreLink(ctx,id){
+  const l=findL(id,ctx);if(!l)return;
+  l.trashedAt=0;l.updatedAt=Date.now();
+  await persist(ctx,l);render();
+  toast(`"${escHTML(l.t)}" dipulihkan`,'ok');
+}
+async function permaDel(ctx,id){
   const list=ctx==='pub'?pub:adm;
   const idx=list.findIndex(x=>x.id===id);if(idx===-1)return;
   const [item]=list.splice(idx,1);
   if(ctx==='pub')await dbDel(STORE_PUB,id);else await saveVault();
   render();
-  toast(`Deleted "${escHTML(item.t)}"`,'inf',{label:'Undo',fn:async()=>{
+  toast(`"${escHTML(item.t)}" dihapus permanen`,'inf',{label:'Undo',fn:async()=>{
     list.splice(Math.min(idx,list.length),0,item);
-    await persist(ctx,item);
-    render();toast('Restored','ok');
+    await persist(ctx,item);render();toast('Restored','ok');
+  }});
+}
+async function archiveLink(ctx,id){
+  const l=findL(id,ctx);if(!l)return;
+  l.archived=true;l.updatedAt=Date.now();
+  await persist(ctx,l);render();
+  toast(`"${escHTML(l.t)}" diarsipkan`,'inf',{label:'Undo',fn:async()=>{
+    l.archived=false;await persist(ctx,l);render();toast('Restored','ok');
+  }});
+}
+async function unarchiveLink(ctx,id){
+  const l=findL(id,ctx);if(!l)return;
+  l.archived=false;l.updatedAt=Date.now();
+  await persist(ctx,l);render();
+  toast(`"${escHTML(l.t)}" dikembalikan dari archive`,'ok');
+}
+async function emptyTrash(){
+  const trashed=[...pub,...(auth?adm:[])].filter(l=>l.trashedAt);
+  if(!trashed.length)return;
+  if(!confirm(`Hapus permanen ${trashed.length} link di Trash?`))return;
+  const removed=[];
+  for(const l of trashed){
+    const ctx=pub.includes(l)?'pub':'adm';
+    const list=ctx==='pub'?pub:adm;
+    const idx=list.indexOf(l);
+    list.splice(idx,1);removed.push({l,ctx,idx});
+    if(ctx==='pub')await dbDel(STORE_PUB,l.id);
+  }
+  if(removed.some(r=>r.ctx==='adm'))await saveVault();
+  render();
+  toast(`${removed.length} link dihapus permanen`,'inf',{label:'Undo',fn:async()=>{
+    for(const {l,ctx,idx} of removed){
+      const list=ctx==='pub'?pub:adm;
+      list.splice(Math.min(idx,list.length),0,l);
+      if(ctx==='pub')await dbPut(STORE_PUB,l);
+    }
+    if(removed.some(r=>r.ctx==='adm'))await saveVault();
+    render();toast('Trash dipulihkan','ok');
   }});
 }
 
@@ -1047,25 +1138,46 @@ function bulkExport(){
   dlBlob(new Blob([JSON.stringify(items.map(({l})=>l),null,2)],{type:'application/json'}),'selected-links.json');
   toast(`${items.length} link diexport`,'ok');
 }
+async function bulkArchive(){
+  const items=selItems().filter(({l})=>!l.trashedAt);if(!items.length)return;
+  items.forEach(({l})=>{l.archived=true;l.updatedAt=Date.now()});
+  await persistBulk(items);
+  clearSel();render();
+  toast(`${items.length} link diarsipkan`,'inf',{label:'Undo',fn:async()=>{
+    items.forEach(({l})=>l.archived=false);
+    await persistBulk(items);render();toast('Restored','ok');
+  }});
+}
 async function bulkDelete(){
   const items=selItems();if(!items.length)return;
-  const removed=[];
-  for(const {l,ctx} of items){
-    const list=ctx==='pub'?pub:adm;
-    const idx=list.indexOf(l);if(idx===-1)continue;
-    list.splice(idx,1);removed.push({l,ctx,idx});
-    if(ctx==='pub')await dbDel(STORE_PUB,l.id);
-  }
-  if(removed.some(r=>r.ctx==='adm'))await saveVault();
-  clearSel();render();
-  toast(`${removed.length} link dihapus`,'inf',{label:'Undo',fn:async()=>{
-    for(const {l,ctx,idx} of removed){
+  // already-trashed selection → permanent delete; otherwise soft-delete to Trash
+  if(items.every(({l})=>l.trashedAt)){
+    const removed=[];
+    for(const {l,ctx} of items){
       const list=ctx==='pub'?pub:adm;
-      list.splice(Math.min(idx,list.length),0,l);
-      if(ctx==='pub')await dbPut(STORE_PUB,l);
+      const idx=list.indexOf(l);if(idx===-1)continue;
+      list.splice(idx,1);removed.push({l,ctx,idx});
+      if(ctx==='pub')await dbDel(STORE_PUB,l.id);
     }
     if(removed.some(r=>r.ctx==='adm'))await saveVault();
-    render();toast(`${removed.length} link dipulihkan`,'ok');
+    clearSel();render();
+    toast(`${removed.length} link dihapus permanen`,'inf',{label:'Undo',fn:async()=>{
+      for(const {l,ctx,idx} of removed){
+        const list=ctx==='pub'?pub:adm;
+        list.splice(Math.min(idx,list.length),0,l);
+        if(ctx==='pub')await dbPut(STORE_PUB,l);
+      }
+      if(removed.some(r=>r.ctx==='adm'))await saveVault();
+      render();toast('Restored','ok');
+    }});
+    return;
+  }
+  items.forEach(({l})=>{l.trashedAt=Date.now();l.updatedAt=Date.now()});
+  await persistBulk(items);
+  clearSel();render();
+  toast(`${items.length} link → Trash`,'inf',{label:'Undo',fn:async()=>{
+    items.forEach(({l})=>l.trashedAt=0);
+    await persistBulk(items);render();toast('Restored','ok');
   }});
 }
 // small popup menu anchored at the clicked button (reuses .cmenu styling)
@@ -1156,6 +1268,45 @@ async function saveAE(){
   cls('ae');render();
 }
 
+// ═══ BULK PASTE — multiple URLs at once (one per line) ═══
+async function bulkPaste(text,ctx){
+  const lines=text.split(/[\n\r\s]+/).map(s=>s.trim()).filter(Boolean);
+  const urls=[];
+  for(let s of lines){
+    if(!/^https?:\/\//i.test(s)){if(/^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(s))s='https://'+s;else continue}
+    try{new URL(s);urls.push(s)}catch{}
+  }
+  if(urls.length<2)return false; // not a bulk paste — let normal flow handle it
+  if(ctx==='adm'&&!auth){toast('Unlock vault dulu','er');return true}
+  const list=ctx==='pub'?pub:adm;
+  const added=[];let dup=0;
+  const seen=new Set();
+  for(const u of urls){
+    const k=normU(u);
+    if(seen.has(k)||[...pub,...adm].some(x=>normU(x.u)===k)){dup++;continue}
+    seen.add(k);
+    const d=domainOf(u);let t=d.split('.')[0];t=t.charAt(0).toUpperCase()+t.slice(1);
+    const now=Date.now();
+    added.push({id:newId(),t,u,f:new URL(u).origin+'/favicon.ico',isFavorite:false,collection:'',tags:[],notes:'',openCount:0,lastOpenedAt:0,createdAt:now,updatedAt:now,archived:false,trashedAt:0,order:list.length+added.length});
+  }
+  for(const n of added){list.push(n);if(ctx==='pub')await dbPut(STORE_PUB,n)}
+  if(ctx==='adm'&&added.length)await saveVault();
+  cls('ae');render();
+  toast(`${added.length} link ditambahkan${dup?` • ${dup} duplikat dilewati`:''}`,added.length?'ok':'er',added.length?{label:'Undo',fn:async()=>{
+    for(const n of added){const i=list.indexOf(n);if(i>-1)list.splice(i,1);if(ctx==='pub')await dbDel(STORE_PUB,n.id)}
+    if(ctx==='adm')await saveVault();
+    render();toast('Bulk add dibatalkan','ok');
+  }}:undefined);
+  return true;
+}
+document.getElementById('aeu').addEventListener('paste',e=>{
+  const text=(e.clipboardData||window.clipboardData).getData('text')||'';
+  if(text.split(/[\n\r\s]+/).filter(s=>s.trim()).length>1){
+    e.preventDefault();
+    bulkPaste(text,document.getElementById('aepv').checked?'adm':'pub');
+  }
+});
+
 // ═══ DRAG & DROP (manual order, 'all'/'private' views) ═══
 let dragSrc=null;
 function ds(e){dragSrc=e.target.closest('.card');dragSrc.classList.add('dragging');e.dataTransfer.effectAllowed='move'}
@@ -1210,8 +1361,12 @@ async function chkPw(){
         const key=await deriveKey(v,unb64(vaultMeta.salt),vaultMeta.iter);
         adm=await decryptVault(vaultMeta,key);
         adm.forEach((l,i)=>migrate(l,i));
+        const cutoff=Date.now()-TRASH_TTL;
+        const nBefore=adm.length;
+        adm=adm.filter(l=>!(l.trashedAt&&l.trashedAt<cutoff));
         adm.sort((a,b)=>a.order-b.order);
         vaultKey=key;vaultPw=v;
+        if(adm.length!==nBefore)await saveVault();
         grant();
       }catch{pwFail('Wrong password')}
     }else{
@@ -1270,7 +1425,7 @@ let healthRunning=false;
 async function checkHealth(silent=true){
   if(healthRunning)return;healthRunning=true;
   if(!silent)toast('Checking links…','inf');
-  const all=[...pub,...(auth?adm:[])];
+  const all=act([...pub,...(auth?adm:[])]);
   for(const l of all)healthCache[l.u]=await pingLink(l);
   healthRunning=false;
   render();
@@ -1299,6 +1454,9 @@ function cpCommands(){
     {t:'Go to Favorites',s:'view',ic:'★',fn:()=>{closeCP();setView('fav')}},
     {t:'Go to Recent',s:'view',ic:'◷',fn:()=>{closeCP();setView('rec')}},
   ];
+  const allL=[...pub,...(auth?adm:[])];
+  if(allL.some(l=>l.archived&&!l.trashedAt))c.push({t:'Go to Archive',s:'view',ic:'⬇',fn:()=>{closeCP();setView('archive')}});
+  if(allL.some(l=>l.trashedAt))c.push({t:'Go to Trash',s:'view',ic:'🗑',fn:()=>{closeCP();setView('trash')}});
   c.push({t:'New session',s:'command',ic:'▶',fn:()=>{closeCP();openSessionEditor(null)}});
   sessions.forEach(s=>c.push({t:'Launch '+s.name,s:'session',ic:'▶',fn:()=>{closeCP();launchSession(s.id)}}));
   collections(auth?[...pub,...adm]:pub).forEach(([col])=>c.push({t:'Go to '+col,s:'collection',ic:'▤',fn:()=>{closeCP();setView('col',col)}}));
@@ -1316,7 +1474,7 @@ function score(q,l){
 }
 function cpQuery(qRaw){
   const q=qRaw.trim().toLowerCase();
-  const links=[...pub,...(auth?adm:[])];
+  const links=act([...pub,...(auth?adm:[])]);
   const linkItems=links
     .map(l=>({l,sc:score(q,l)}))
     .filter(x=>x.sc>0)
