@@ -170,6 +170,22 @@ a{color:inherit;text-decoration:none}
 .cpe{padding:22px;text-align:center;font-size:12px;color:var(--muted)}
 .cpf{display:flex;gap:14px;padding:8px 14px;border-top:1px solid var(--border);font-size:10px;color:var(--muted)}
 
+/* Multi-select */
+.selbox{position:absolute;top:8px;left:8px;width:22px;height:22px;border-radius:7px;border:1.5px solid var(--border-strong);background:var(--surface);display:flex;align-items:center;justify-content:center;color:transparent;opacity:0;transition:all .15s;z-index:6}
+.card:hover .selbox{opacity:1}
+body.selmode .selbox{opacity:1}
+.selbox:hover{border-color:var(--accent)}
+.selbox.on{opacity:1;background:var(--accent);border-color:var(--accent);color:#fff}
+.card.selected{outline:2px solid var(--accent);outline-offset:-2px}
+.bulkbar{position:fixed;bottom:18px;left:50%;transform:translateX(-50%) translateY(80px);z-index:120;display:flex;align-items:center;gap:4px;padding:8px 10px;border-radius:14px;background:color-mix(in srgb,var(--raised) 92%,transparent);backdrop-filter:blur(16px);border:1px solid var(--border-strong);box-shadow:var(--shadow);transition:transform .25s cubic-bezier(.16,1,.3,1);max-width:94vw;overflow-x:auto}
+.bulkbar.on{transform:translateX(-50%) translateY(0)}
+.bulkbar .bbc{font-size:12px;font-weight:700;color:var(--accent);padding:0 8px;white-space:nowrap}
+.bbb{display:flex;align-items:center;gap:6px;padding:7px 11px;border-radius:9px;font-size:12px;color:var(--text);white-space:nowrap;transition:background .12s}
+.bbb:hover{background:var(--accent-soft)}
+.bbb.danger{color:var(--bad)}
+.bbb.danger:hover{background:rgba(244,63,94,.12)}
+.bbsep{width:1px;height:20px;background:var(--border);flex-shrink:0}
+
 /* Sidebar launch button */
 .slaunch{display:flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;color:var(--muted);margin-left:auto;flex-shrink:0;transition:all .15s}
 .slaunch:hover{background:var(--accent-soft);color:var(--accent)}
@@ -267,6 +283,21 @@ pre.code .k{color:#F92672}pre.code .s{color:#E6DB74}pre.code .t{color:#A78BFA}pr
 <canvas id="amb"></canvas>
 <canvas id="cf" style="display:none"></canvas>
 <div class="tw" id="tw"></div>
+
+<!-- ═══ BULK ACTION BAR (floating, shown when selection active) ═══ -->
+<div class="bulkbar" id="bulkbar">
+  <span class="bbc" id="bbcount">0 dipilih</span>
+  <span class="bbsep"></span>
+  <button class="bbb" onclick="bulkFav()" title="Toggle favorite">★ Favorite</button>
+  <button class="bbb" onclick="bulkCollection()" title="Pindah collection">▤ Collection</button>
+  <button class="bbb" onclick="bulkSession(event)" title="Tambah ke session">▶ Session</button>
+  <button class="bbb" onclick="bulkVisibility(event)" title="Ubah visibility">🔒 Visibility</button>
+  <button class="bbb" onclick="bulkHealth()" title="Cek health link terpilih">♥ Health</button>
+  <button class="bbb" onclick="bulkExport()" title="Export JSON">⇩ Export</button>
+  <span class="bbsep"></span>
+  <button class="bbb danger" onclick="bulkDelete()">Delete</button>
+  <button class="bbb" onclick="clearSel()" title="Batal (Esc)">✕</button>
+</div>
 
 <!-- ═══ TOPBAR ═══ -->
 <header class="topbar">
@@ -391,6 +422,7 @@ let aeCtx='pub',aeId=null,genCtx='pub',lastGen='';
 let view={type:'all'};
 let healthCache={};
 let sessions=[],sessEditId=null,sessPick=new Set();
+let sel=new Set(); // multi-select: keys 'ctx:id'
 
 const DEF_PUB=[
   {id:'p1',t:'GitHub',u:'https://github.com',f:'https://github.com/favicon.ico',collection:'Development'},
@@ -821,8 +853,12 @@ function cardHTML(l,i,ctx,draggable){
   const htit=h==='ok'?'Reachable':'Not verified — browser cannot fully check this';
   const dom=domainOf(l.u);
   const drag=draggable?` draggable="true" ondragstart="ds(event)" ondragend="de(event)" ondragover="do_(event)" ondrop="dp(event)"`:'';
-  return `<div class="card au" data-id="${l.id}" data-ctx="${ctx}"${drag}
-    style="animation-delay:${Math.min(i*30,300)}ms" onclick="openLink('${l.id}','${ctx}')" title="${escAttr(l.t)}${l.notes?' — '+escAttr(l.notes):''}">
+  const selKey=ctx+':'+l.id;
+  return `<div class="card au${sel.has(selKey)?' selected':''}" data-id="${l.id}" data-ctx="${ctx}"${drag}
+    style="animation-delay:${Math.min(i*30,300)}ms" onclick="cardClick(event,'${l.id}','${ctx}')" title="${escAttr(l.t)}${l.notes?' — '+escAttr(l.notes):''}">
+    <button class="selbox${sel.has(selKey)?' on':''}" onclick="event.stopPropagation();toggleSel('${escJS(selKey)}')" title="Select (Ctrl+click)">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+    </button>
     <button class="star${l.isFavorite?' on':''}" onclick="event.stopPropagation();toggleFav('${l.id}','${ctx}')" title="Favorite">
       <svg width="13" height="13" viewBox="0 0 24 24" fill="${l.isFavorite?'currentColor':'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
     </button>
@@ -893,6 +929,157 @@ async function del(ctx,id){
     await persist(ctx,item);
     render();toast('Restored','ok');
   }});
+}
+
+// ═══ MULTI-SELECT + BULK ACTIONS ═══
+function cardClick(e,id,ctx){
+  if(e.ctrlKey||e.metaKey||sel.size){toggleSel(ctx+':'+id);return}
+  openLink(id,ctx);
+}
+function toggleSel(key){
+  sel.has(key)?sel.delete(key):sel.add(key);
+  updateSelUI();
+}
+function clearSel(){sel.clear();updateSelUI()}
+function updateSelUI(){
+  document.body.classList.toggle('selmode',sel.size>0);
+  document.getElementById('bulkbar').classList.toggle('on',sel.size>0);
+  document.getElementById('bbcount').textContent=sel.size+' dipilih';
+  // targeted DOM update (no full re-render, avoids replaying card animations)
+  document.querySelectorAll('.card[data-id]').forEach(c=>{
+    const on=sel.has(c.dataset.ctx+':'+c.dataset.id);
+    c.classList.toggle('selected',on);
+    const b=c.querySelector('.selbox');if(b)b.classList.toggle('on',on);
+  });
+}
+// resolve selection to live links; drops stale keys
+function selItems(){
+  const out=[];
+  for(const key of sel){
+    const i=key.indexOf(':');const ctx=key.slice(0,i),id=key.slice(i+1);
+    const l=(ctx==='pub'?pub:adm).find(x=>x.id===id);
+    if(l)out.push({l,ctx});
+  }
+  return out;
+}
+async function persistBulk(items){
+  let admTouched=false;
+  for(const {l,ctx} of items){
+    if(ctx==='pub')await dbPut(STORE_PUB,l);else admTouched=true;
+  }
+  if(admTouched)await saveVault();
+}
+async function bulkFav(){
+  const items=selItems();if(!items.length)return;
+  const allFav=items.every(({l})=>l.isFavorite);
+  items.forEach(({l})=>{l.isFavorite=!allFav;l.updatedAt=Date.now()});
+  await persistBulk(items);
+  render();updateSelUI();
+  toast(allFav?`${items.length} link dihapus dari favorites`:`${items.length} link difavoritkan`,'ok');
+}
+async function bulkCollection(){
+  const items=selItems();if(!items.length)return;
+  const name=prompt('Pindahkan '+items.length+' link ke collection:\n(kosongkan untuk menghapus dari collection)');
+  if(name===null)return;
+  items.forEach(({l})=>{l.collection=name.trim();l.updatedAt=Date.now()});
+  await persistBulk(items);
+  render();updateSelUI();
+  toast(name.trim()?`${items.length} link → "${escHTML(name.trim())}"`:`${items.length} link dikeluarkan dari collection`,'ok');
+}
+function bulkSession(e){
+  const items=selItems();if(!items.length)return;
+  const menu=[{label:'＋ New session…',fn:()=>{
+    sessEditId=null;sessPick=new Set(items.map(({l,ctx})=>ctx+':'+l.id));
+    document.getElementById('sesTitle').textContent='New Session';
+    document.getElementById('sesName').value='';
+    renderSessPick();op('ses');
+    setTimeout(()=>document.getElementById('sesName').focus(),150);
+  }}];
+  sessions.forEach(s=>menu.push({label:'Add to "'+s.name+'"',fn:async()=>{
+    let added=0;
+    items.forEach(({l,ctx})=>{
+      if(!s.items.some(it=>it.ctx===ctx&&it.id===l.id)){s.items.push({ctx,id:l.id});added++}
+    });
+    s.updatedAt=Date.now();await saveSessions();render();updateSelUI();
+    toast(added?`${added} link ditambahkan ke "${escHTML(s.name)}"`:'Semua sudah ada di session itu','ok');
+  }}));
+  menuAt(e,menu);
+}
+function bulkVisibility(e){
+  const items=selItems();if(!items.length)return;
+  menuAt(e,[
+    {label:'🔒 Jadikan Private',fn:async()=>{
+      if(!auth){toast('Unlock vault dulu','er');return}
+      let moved=0;
+      for(const {l,ctx} of items){
+        if(ctx==='adm')continue;
+        pub.splice(pub.indexOf(l),1);await dbDel(STORE_PUB,l.id);
+        l.updatedAt=Date.now();adm.push(l);moved++;
+      }
+      if(moved)await saveVault();
+      clearSel();render();
+      toast(`${moved} link dipindah ke Private Vault`,'ok');
+    }},
+    {label:'🌐 Jadikan Public',fn:async()=>{
+      if(!auth){toast('Unlock vault dulu','er');return}
+      let moved=0;
+      for(const {l,ctx} of items){
+        if(ctx==='pub')continue;
+        adm.splice(adm.indexOf(l),1);
+        l.updatedAt=Date.now();pub.push(l);await dbPut(STORE_PUB,l);moved++;
+      }
+      if(moved)await saveVault();
+      clearSel();render();
+      toast(`${moved} link dipindah ke Public`,'ok');
+    }},
+  ]);
+}
+async function bulkHealth(){
+  const items=selItems();if(!items.length)return;
+  toast(`Checking ${items.length} links…`,'inf');
+  for(const {l} of items)healthCache[l.u]=await pingLink(l);
+  render();updateSelUI();
+  const ok=items.filter(({l})=>healthCache[l.u]==='ok').length;
+  toast(`${ok}/${items.length} reachable`,'ok');
+}
+function bulkExport(){
+  const items=selItems();if(!items.length)return;
+  dlBlob(new Blob([JSON.stringify(items.map(({l})=>l),null,2)],{type:'application/json'}),'selected-links.json');
+  toast(`${items.length} link diexport`,'ok');
+}
+async function bulkDelete(){
+  const items=selItems();if(!items.length)return;
+  const removed=[];
+  for(const {l,ctx} of items){
+    const list=ctx==='pub'?pub:adm;
+    const idx=list.indexOf(l);if(idx===-1)continue;
+    list.splice(idx,1);removed.push({l,ctx,idx});
+    if(ctx==='pub')await dbDel(STORE_PUB,l.id);
+  }
+  if(removed.some(r=>r.ctx==='adm'))await saveVault();
+  clearSel();render();
+  toast(`${removed.length} link dihapus`,'inf',{label:'Undo',fn:async()=>{
+    for(const {l,ctx,idx} of removed){
+      const list=ctx==='pub'?pub:adm;
+      list.splice(Math.min(idx,list.length),0,l);
+      if(ctx==='pub')await dbPut(STORE_PUB,l);
+    }
+    if(removed.some(r=>r.ctx==='adm'))await saveVault();
+    render();toast(`${removed.length} link dipulihkan`,'ok');
+  }});
+}
+// small popup menu anchored at the clicked button (reuses .cmenu styling)
+function menuAt(e,items){
+  e.stopPropagation();closeMenu();
+  const d=document.createElement('div');d.className='cmenu';
+  d.innerHTML=items.map((it,i)=>`<button data-mi="${i}">${escHTML(it.label)}</button>`).join('');
+  d.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{closeMenu();items[+b.dataset.mi].fn()}));
+  document.body.appendChild(d);
+  const r=d.getBoundingClientRect();
+  d.style.left=Math.min(e.clientX,window.innerWidth-r.width-10)+'px';
+  d.style.top=Math.max(10,Math.min(e.clientY-r.height-8,window.innerHeight-r.height-10))+'px';
+  menuEl=d;
+  setTimeout(()=>document.addEventListener('click',closeMenu,{once:true}),0);
 }
 
 // ═══ ADD / EDIT ═══
@@ -1170,7 +1357,7 @@ document.addEventListener('keydown',e=>{
   if(typing)return;
   if(e.key==='/'){e.preventDefault();openCP()}
   else if(e.key.toLowerCase()==='n'){e.preventDefault();ed(view.type==='private'&&auth?'adm':'pub',null)}
-  else if(e.key==='Escape'){closeCP();closeMenu();document.querySelectorAll('.mo.on').forEach(m=>m.classList.remove('on'))}
+  else if(e.key==='Escape'){closeCP();closeMenu();clearSel();document.querySelectorAll('.mo.on').forEach(m=>m.classList.remove('on'))}
 });
 
 // ═══ GENERATE HTML ═══
