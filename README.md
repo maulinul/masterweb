@@ -11,6 +11,7 @@ Single-file link manager & start page. Buka `index.html` (atau host di GitHub Pa
 - **Multi-select + bulk actions** — Ctrl+klik atau checkbox untuk memilih beberapa link; action bar mengambang: favorite, pindah collection, tambah ke session, ubah visibility (public↔private), cek health, export JSON, archive, dan delete dengan Undo; `Esc` membatalkan seleksi
 - **Bulk paste** — paste beberapa URL sekaligus (satu per baris) di dialog Add Link; judul & favicon otomatis, duplikat dilewati, bisa di-Undo
 - **Archive & Trash** — delete tidak langsung permanen: link mampir ke Trash dan otomatis terhapus setelah 30 hari (dengan badge sisa hari); Archive menyembunyikan link dari view utama tanpa menghapus; semua aksi punya Undo
+- **Inspector panel** — drawer kanan dengan detail lengkap satu link: favicon, domain, URL (klik untuk copy), status health + re-check, collection/tags/smart category, statistik penggunaan, notes, daftar session yang memuatnya, dan aksi Open/Edit/Archive/HTML; buka lewat Alt+klik atau menu ⋯ → Inspect
 - **Command palette** — `Ctrl+K` / `/` : fuzzy search (judul, URL, domain, tag, collection) + perintah
 - **Quick add** — tekan `N`, paste URL, Enter; judul & favicon otomatis, cek duplikat
 - **Compact cards** — favicon, domain, collection chip, favorite star, quick actions saat hover
