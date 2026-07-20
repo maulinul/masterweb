@@ -467,6 +467,15 @@ pre.code .k{color:#F92672}pre.code .s{color:#E6DB74}pre.code .t{color:#A78BFA}pr
   </div>
 </div>
 
+<!-- ═══ LIBRARY SCAN MODAL (duplicates + dead links) ═══ -->
+<div class="mo" id="dupmo">
+  <div class="mm" style="max-width:560px">
+    <button class="mc" onclick="cls('dupmo')"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+    <h2>Library Scan</h2>
+    <div id="dupbody"></div>
+  </div>
+</div>
+
 <!-- ═══ SESSION EDITOR MODAL ═══ -->
 <div class="mo" id="ses">
   <div class="mm">
@@ -530,7 +539,28 @@ function newId(){return 'x'+Date.now().toString(36)+Math.random().toString(36).s
 const TRASH_TTL=30*86400000; // auto-delete after 30 days in trash
 function isActive(l){return !l.archived&&!l.trashedAt}
 const act=list=>list.filter(isActive);
-function normU(u){try{const o=new URL(u);return (o.origin+o.pathname.replace(/\/+$/,'')+o.search).toLowerCase()}catch{return (u||'').toLowerCase()}}
+// strip tracking params + hash from a URL (kept when storing)
+const TRACK_RE=/^(utm_|fbclid$|gclid$|dclid$|msclkid$|igshid$|mc_cid$|mc_eid$|yclid$|wickedid$|vero_|_hs|ref$|ref_src$)/i;
+function cleanURL(u){
+  try{
+    const o=new URL(u);
+    const del=[];o.searchParams.forEach((v,k)=>{if(TRACK_RE.test(k))del.push(k)});
+    del.forEach(k=>o.searchParams.delete(k));
+    o.hash='';
+    let s=o.toString();
+    if(s.endsWith('?'))s=s.slice(0,-1);
+    return s;
+  }catch{return u}
+}
+// canonical key for duplicate detection: cleaned + no www + no trailing slash, lowercased
+function normU(u){
+  try{
+    const o=new URL(cleanURL(u));
+    const host=o.hostname.replace(/^www\./,'');
+    const q=o.searchParams.toString();
+    return (host+o.pathname.replace(/\/+$/,'')+(q?'?'+q:'')).toLowerCase();
+  }catch{return (u||'').toLowerCase()}
+}
 function domainOf(u){try{return new URL(u).hostname.replace(/^www\./,'')}catch{return u}}
 
 // ═══ INDEXEDDB ═══
@@ -1100,6 +1130,91 @@ async function emptyTrash(){
   }});
 }
 
+// ═══ LIBRARY SCAN — duplicate detection + unverified links ═══
+function findDuplicates(){
+  const map=new Map();
+  const src=[...pub.map(l=>({l,ctx:'pub'})),...(auth?adm.map(l=>({l,ctx:'adm'})):[])].filter(({l})=>!l.trashedAt);
+  src.forEach(e=>{const k=normU(e.l.u);if(!map.has(k))map.set(k,[]);map.get(k).push(e)});
+  return [...map.entries()].filter(([,g])=>g.length>1);
+}
+function dupKeeper(g){ // most used, then oldest
+  return [...g].sort((a,b)=>(b.l.openCount||0)-(a.l.openCount||0)||(a.l.createdAt||0)-(b.l.createdAt||0))[0];
+}
+async function mergeDupGroup(key){
+  const found=findDuplicates().find(([k])=>k===key);if(!found)return;
+  const g=found[1];
+  const keep=dupKeeper(g);
+  const rest=g.filter(e=>e!==keep);
+  keep.l.isFavorite=g.some(e=>e.l.isFavorite);
+  keep.l.collection=keep.l.collection||rest.map(e=>e.l.collection).find(Boolean)||'';
+  keep.l.tags=[...new Set(g.flatMap(e=>e.l.tags||[]))];
+  keep.l.notes=[...new Set(g.map(e=>(e.l.notes||'').trim()).filter(Boolean))].join('\n');
+  keep.l.openCount=g.reduce((s,e)=>s+(e.l.openCount||0),0);
+  keep.l.lastOpenedAt=Math.max(...g.map(e=>e.l.lastOpenedAt||0));
+  keep.l.createdAt=Math.min(...g.map(e=>e.l.createdAt||Date.now()));
+  keep.l.updatedAt=Date.now();
+  rest.forEach(e=>{e.l.trashedAt=Date.now();e.l.updatedAt=Date.now()}); // undo path: Trash
+  await persistBulk(g);
+  render();renderScan();
+  toast(`Merged — ${rest.length} duplikat dipindah ke Trash`,'ok');
+}
+async function mergeAllDups(){
+  const keys=findDuplicates().map(([k])=>k);
+  for(const k of keys)await mergeDupGroup(k);
+}
+function openScan(){renderScan();op('dupmo')}
+function scanRow(l,ctx,btns){
+  return `<div style="display:flex;align-items:center;gap:9px;padding:7px 4px;border-bottom:1px solid var(--border)">
+    <img class="cf" style="width:20px;height:20px" src="${escAttr(l.f||'')}" onerror="this.style.visibility='hidden'">
+    <div style="min-width:0;flex:1"><div style="font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHTML(l.t)}${ctx==='adm'?' 🔒':''}</div>
+    <div class="mono" style="font-size:9px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHTML(l.u)}</div></div>
+    ${btns}
+  </div>`;
+}
+function renderScan(){
+  const groups=findDuplicates();
+  const active=act([...pub,...(auth?adm:[])]);
+  const unk=active.filter(l=>healthCache[l.u]==='unk');
+  const unchecked=active.filter(l=>!healthCache[l.u]).length;
+  let h='';
+  // ── duplicates ──
+  h+=`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+    <p style="font-size:13px;font-weight:600;flex:1">Duplikat ${groups.length?`<span class="chip" style="background:rgba(245,158,11,.12);color:var(--warn)">${groups.length} grup</span>`:''}</p>
+    ${groups.length>1?`<button class="btnp btnsm" style="padding:6px 12px;font-size:11px" onclick="mergeAllDups()">Merge semua</button>`:''}
+  </div>`;
+  if(!groups.length)h+=`<p style="font-size:11px;color:var(--muted);margin-bottom:14px">✓ Tidak ada URL duplikat (normalisasi: tracking params, www, trailing slash).</p>`;
+  groups.forEach(([key,g])=>{
+    const keep=dupKeeper(g);
+    h+=`<div style="border:1px solid var(--border);border-radius:12px;padding:8px 10px;margin-bottom:10px">
+      ${g.map(e=>scanRow(e.l,e.ctx,e===keep?'<span class="chip">keep</span>':'<span class="chip" style="background:var(--raised);color:var(--muted)">→ trash</span>')).join('')}
+      <button class="btnp btnw" style="padding:8px;font-size:12px;margin-top:8px" onclick="mergeDupGroup('${escJS(key)}')">Merge (gabungkan metadata, sisanya ke Trash)</button>
+    </div>`;
+  });
+  // ── unverified ──
+  h+=`<div style="display:flex;align-items:center;gap:8px;margin:16px 0 8px">
+    <p style="font-size:13px;font-weight:600;flex:1">Tidak terverifikasi ${unk.length?`<span class="chip" style="background:rgba(244,63,94,.12);color:var(--bad)">${unk.length}</span>`:''}</p>
+    <button class="btnp btnsm btno" style="padding:6px 12px;font-size:11px" onclick="scanHealth()">${unchecked?`Check ${unchecked} link`:'Re-check semua'}</button>
+  </div>
+  <p style="font-size:10px;color:var(--muted);margin-bottom:8px">Favicon link ini tidak merespons — bisa jadi mati, atau hanya memblokir ping browser. Bukan vonis, tapi layak dicek.</p>`;
+  if(!unk.length)h+=`<p style="font-size:11px;color:var(--muted)">✓ Tidak ada link bermasalah${unchecked?` (${unchecked} belum dicek)`:''}.</p>`;
+  unk.forEach(l=>{
+    const ctx=pub.includes(l)?'pub':'adm';
+    h+=scanRow(l,ctx,`
+      <button class="cab" title="Check again" onclick="scanRecheck('${ctx}','${l.id}')">↻</button>
+      <button class="cab" title="Inspect" onclick="cls('dupmo');openInsp('${ctx}','${l.id}')">🔍</button>
+      <button class="cab" title="Archive" onclick="archiveLink('${ctx}','${l.id}').then(renderScan)">⬇</button>
+      <button class="cab" title="Trash" onclick="del('${ctx}','${l.id}').then(renderScan)">🗑</button>`);
+  });
+  document.getElementById('dupbody').innerHTML=h;
+}
+async function scanHealth(){await checkHealth(false);renderScan()}
+async function scanRecheck(ctx,id){
+  const l=findL(id,ctx);if(!l)return;
+  healthCache[l.u]=await pingLink(l);
+  renderScan();render();
+  toast(healthCache[l.u]==='ok'?'Reachable ✓':'Masih tidak merespons','inf');
+}
+
 // ═══ INSPECTOR PANEL ═══
 function timeAgo(ts){
   if(!ts)return '—';
@@ -1386,6 +1501,7 @@ function aeUrlHint(){
   if(!u){hint.textContent='';return}
   const dup=[...pub,...adm].find(x=>normU(x.u)===normU(u)&&x.id!==aeId);
   if(dup){hint.innerHTML=`⚠ Sudah ada: <b>${escHTML(dup.t)}</b>`;hint.style.color='var(--warn)'}
+  else if(/^https?:\/\//i.test(u)&&cleanURL(u)!==u){hint.textContent='🧹 Tracking params akan dibersihkan otomatis';hint.style.color='var(--muted)'}
   else{try{const d=domainOf(u);hint.textContent=d?'→ '+d:'';hint.style.color='var(--muted)'}catch{hint.textContent=''}}
 }
 async function saveAE(){
@@ -1393,6 +1509,7 @@ async function saveAE(){
   if(!u){toast('Masukkan URL dulu','er');return}
   let url=u;if(!/^https?:\/\//i.test(url))url='https://'+url;
   try{new URL(url)}catch{toast('URL tidak valid','er');return}
+  url=cleanURL(url);
   const dup=[...pub,...adm].find(x=>normU(x.u)===normU(url)&&x.id!==aeId);
   if(dup){toast(`Duplikat: sudah ada "${escHTML(dup.t)}"`,'er');return}
   let t=document.getElementById('aetit').value.trim();
@@ -1432,7 +1549,7 @@ async function bulkPaste(text,ctx){
   const urls=[];
   for(let s of lines){
     if(!/^https?:\/\//i.test(s)){if(/^[\w-]+(\.[\w-]+)+(\/\S*)?$/.test(s))s='https://'+s;else continue}
-    try{new URL(s);urls.push(s)}catch{}
+    try{new URL(s);urls.push(cleanURL(s))}catch{}
   }
   if(urls.length<2)return false; // not a bulk paste — let normal flow handle it
   if(ctx==='adm'&&!auth){toast('Unlock vault dulu','er');return true}
@@ -1604,6 +1721,7 @@ function cpCommands(){
     {t:'Add new link',s:'command',ic:'＋',fn:()=>{closeCP();ed('pub',null)}},
     {t:auth?'Lock private vault':'Open private vault',s:'command',ic:'🔒',fn:()=>{closeCP();auth?lockSess():setView('private')}},
     {t:'Check link health',s:'command',ic:'♥',fn:()=>{closeCP();checkHealth(false)}},
+    {t:'Scan duplicates & dead links',s:'command',ic:'⌕',fn:()=>{closeCP();openScan()}},
     {t:'Import / Export',s:'command',ic:'⇅',fn:()=>{closeCP();openIE(auth&&view.type==='private'?'adm':'pub')}},
     {t:'Open HTML Studio',s:'command',ic:'</>',fn:()=>{closeCP();gen(auth&&view.type==='private'?'adm':'pub',null)}},
     {t:'Toggle theme',s:'command',ic:'◐',fn:()=>{closeCP();toggleTheme()}},
@@ -1644,10 +1762,14 @@ function cpQuery(qRaw){
   cpIdx=0;
   renderCP();
 }
+function cpHover(i){ // highlight only — no re-render, or the in-flight click gets swallowed
+  cpIdx=i;
+  document.querySelectorAll('#cpr .cpi').forEach((el,j)=>el.classList.toggle('on',j===i));
+}
 function renderCP(){
   const r=document.getElementById('cpr');
   if(!cpItems.length){r.innerHTML='<div class="cpe">Tidak ditemukan. Enter untuk menambahkan sebagai link baru.</div>';return}
-  r.innerHTML=cpItems.map((it,i)=>`<div class="cpi${i===cpIdx?' on':''}" onmouseenter="cpIdx=${i};renderCP()" onclick="cpItems[${i}].fn()">
+  r.innerHTML=cpItems.map((it,i)=>`<div class="cpi${i===cpIdx?' on':''}" onmouseenter="cpHover(${i})" onclick="cpItems[${i}].fn()">
     <span class="ic">${it.fav?`<img src="${escAttr(it.fav)}" onerror="this.style.display='none'">`:(it.ic||'▸')}</span>
     <span class="t">${escHTML(it.t)}</span><span class="s">${escHTML(it.s||'')}</span>
     ${it.tag?`<span class="tag">${escHTML(it.tag)}</span>`:''}
@@ -1967,7 +2089,8 @@ function openSet(ctx){
   let h=`
     <div class="sr" onclick="cls('so');setTimeout(()=>gen(setCtx,null),250)"><div><p class="st">HTML Studio</p><p class="sd">Generate HTML self-contained: dropdown, grid, atau list + live preview</p></div></div>
     <div class="sr" onclick="cls('so');setTimeout(()=>openIE(setCtx),250)"><div><p class="st">Import / Export</p><p class="sd">JSON, CSV, atau Netscape Bookmark</p></div></div>
-    <div class="sr" onclick="cls('so');checkHealth(false)"><div><p class="st">Check Link Health</p><p class="sd">Ping favicon tiap link (hasil: reachable / not verified)</p></div></div>`;
+    <div class="sr" onclick="cls('so');checkHealth(false)"><div><p class="st">Check Link Health</p><p class="sd">Ping favicon tiap link (hasil: reachable / not verified)</p></div></div>
+    <div class="sr" onclick="cls('so');setTimeout(openScan,250)"><div><p class="st">Library Scan</p><p class="sd">Deteksi URL duplikat (merge) dan link tidak terverifikasi</p></div></div>`;
   if(isAdm)h+=`<div class="sr" onclick="showChpw()"><div><p class="st">Change Vault Password</p><p class="sd">Re-enkripsi vault dengan password baru (AES-256)</p></div></div>
     <div id="cpwF" style="display:none;border-radius:14px;border:1px solid var(--border);background:var(--surface);padding:14px;margin-bottom:8px">
       <div class="fd"><input type="password" id="cpwo" placeholder="Old password"></div>

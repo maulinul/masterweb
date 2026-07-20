@@ -12,6 +12,7 @@ Single-file link manager & start page. Buka `index.html` (atau host di GitHub Pa
 - **Bulk paste** — paste beberapa URL sekaligus (satu per baris) di dialog Add Link; judul & favicon otomatis, duplikat dilewati, bisa di-Undo
 - **Archive & Trash** — delete tidak langsung permanen: link mampir ke Trash dan otomatis terhapus setelah 30 hari (dengan badge sisa hari); Archive menyembunyikan link dari view utama tanpa menghapus; semua aksi punya Undo
 - **Inspector panel** — drawer kanan dengan detail lengkap satu link: favicon, domain, URL (klik untuk copy), status health + re-check, collection/tags/smart category, statistik penggunaan, notes, daftar session yang memuatnya, dan aksi Open/Edit/Archive/HTML; buka lewat Alt+klik atau menu ⋯ → Inspect
+- **Library Scan** — deteksi URL duplikat (normalisasi tracking params/www/trailing slash) dengan merge sekali klik yang menggabungkan metadata (favorit, collection, tags, notes, usage) dan memindahkan sisanya ke Trash; plus daftar link tidak terverifikasi dengan aksi re-check/inspect/archive/trash; URL baru otomatis dibersihkan dari tracking params saat disimpan
 - **Command palette** — `Ctrl+K` / `/` : fuzzy search (judul, URL, domain, tag, collection) + perintah
 - **Quick add** — tekan `N`, paste URL, Enter; judul & favicon otomatis, cek duplikat
 - **Compact cards** — favicon, domain, collection chip, favorite star, quick actions saat hover
