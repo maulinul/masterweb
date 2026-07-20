@@ -170,6 +170,29 @@ a{color:inherit;text-decoration:none}
 .cpe{padding:22px;text-align:center;font-size:12px;color:var(--muted)}
 .cpf{display:flex;gap:14px;padding:8px 14px;border-top:1px solid var(--border);font-size:10px;color:var(--muted)}
 
+/* Inspector panel (right drawer) */
+.insp{position:fixed;top:56px;right:0;bottom:0;width:330px;max-width:92vw;z-index:60;background:var(--surface);border-left:1px solid var(--border);box-shadow:var(--shadow);transform:translateX(105%);transition:transform .25s cubic-bezier(.16,1,.3,1);display:flex;flex-direction:column}
+.insp.on{transform:translateX(0)}
+.insp .ihead{display:flex;align-items:center;gap:8px;padding:14px 16px;border-bottom:1px solid var(--border)}
+.insp .ihead h3{font-size:13px;font-weight:600;color:var(--text-soft);text-transform:uppercase;letter-spacing:.08em;font-family:'Inter';flex:1}
+.insp .ibody{flex:1;overflow-y:auto;padding:18px 16px}
+.iface{display:flex;align-items:center;gap:12px;margin-bottom:14px}
+.iface img{width:44px;height:44px;border-radius:11px;object-fit:contain;background:var(--raised);padding:5px;flex-shrink:0}
+.iface .it{font-size:16px;font-weight:700;font-family:'Poppins';line-height:1.3;word-break:break-word}
+.iface .id_{font-family:'JetBrains Mono';font-size:11px;color:var(--muted);margin-top:2px}
+.iurl{font-family:'JetBrains Mono';font-size:10px;color:var(--text-soft);background:var(--input-bg);border:1px solid var(--border);border-radius:9px;padding:8px 10px;word-break:break-all;cursor:pointer;transition:border-color .15s;margin-bottom:12px}
+.iurl:hover{border-color:var(--accent)}
+.ichips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;min-height:10px}
+.istat{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px}
+.istat .sb_{border:1px solid var(--border);border-radius:10px;padding:9px 11px;background:var(--raised)}
+.istat .sl_{font-size:9px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.istat .sv_{font-size:12px;font-weight:600;margin-top:2px}
+.inotes{border:1px solid var(--border);border-radius:10px;padding:10px 12px;background:var(--raised);font-size:12px;color:var(--text-soft);white-space:pre-wrap;word-break:break-word;margin-bottom:14px}
+.iacts{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:14px 16px;border-top:1px solid var(--border)}
+.iacts .btnp{justify-content:center;padding:10px;font-size:12px}
+.ihl{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--text-soft);margin-bottom:14px}
+@media(max-width:860px){.insp{top:0;width:100vw;max-width:100vw}}
+
 /* Multi-select */
 .selbox{position:absolute;top:8px;left:8px;width:22px;height:22px;border-radius:7px;border:1.5px solid var(--border-strong);background:var(--surface);display:flex;align-items:center;justify-content:center;color:transparent;opacity:0;transition:all .15s;z-index:6}
 .card:hover .selbox{opacity:1}
@@ -300,6 +323,16 @@ pre.code .k{color:#F92672}pre.code .s{color:#E6DB74}pre.code .t{color:#A78BFA}pr
   <button class="bbb" onclick="clearSel()" title="Batal (Esc)">✕</button>
 </div>
 
+<!-- ═══ INSPECTOR PANEL (right drawer) ═══ -->
+<aside class="insp" id="insp">
+  <div class="ihead">
+    <h3>Inspector</h3>
+    <button class="tbtn" onclick="closeInsp()" title="Close (Esc)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+  </div>
+  <div class="ibody" id="ibody"></div>
+  <div class="iacts" id="iacts"></div>
+</aside>
+
 <!-- ═══ TOPBAR ═══ -->
 <header class="topbar">
   <button class="tbtn" id="menuBtn" onclick="toggleSidebar()" title="Menu">
@@ -425,6 +458,7 @@ let view={type:'all'};
 let healthCache={};
 let sessions=[],sessEditId=null,sessPick=new Set();
 let sel=new Set(); // multi-select: keys 'ctx:id'
+let inspTarget=null; // {ctx,id} while inspector open
 
 const DEF_PUB=[
   {id:'p1',t:'GitHub',u:'https://github.com',f:'https://github.com/favicon.ico',collection:'Development'},
@@ -798,6 +832,7 @@ function greeting(){
 }
 function render(){
   renderSidebar();
+  if(inspTarget)renderInsp(); // sync/auto-close inspector on every state change
   const m=document.getElementById('main');
   if(view.type==='private'&&!auth){m.innerHTML=unlockHTML();const pi=document.getElementById('pwi');if(pi)pi.focus();return}
   let h='';
@@ -917,11 +952,13 @@ function moreMenu(e,id,ctx){
   const d=document.createElement('div');d.className='cmenu';
   let items='';
   if(l.trashedAt){
-    items=`<button onclick="restoreLink('${ctx}','${id}');closeMenu()">↩ Restore</button>
+    items=`<button onclick="openInsp('${ctx}','${id}')">🔍 Inspect</button>
+      <button onclick="restoreLink('${ctx}','${id}');closeMenu()">↩ Restore</button>
       <div class="sep"></div>
       <button class="danger" onclick="permaDel('${ctx}','${id}');closeMenu()">Delete permanently</button>`;
   }else{
-    items=`<button onclick="openLink('${id}','${ctx}');closeMenu()">Open in new tab</button>
+    items=`<button onclick="openInsp('${ctx}','${id}')">🔍 Inspect</button>
+      <button onclick="openLink('${id}','${ctx}');closeMenu()">Open in new tab</button>
       <button onclick="gen('${ctx}','${id}');closeMenu()">Generate HTML</button>
       <button onclick="${l.archived?`unarchiveLink('${ctx}','${id}')`:`archiveLink('${ctx}','${id}')`};closeMenu()">${l.archived?'↩ Unarchive':'⬇ Archive'}</button>
       <div class="sep"></div>
@@ -1022,8 +1059,88 @@ async function emptyTrash(){
   }});
 }
 
+// ═══ INSPECTOR PANEL ═══
+function timeAgo(ts){
+  if(!ts)return '—';
+  const d=Date.now()-ts;
+  if(d<60000)return 'baru saja';
+  if(d<3600000)return Math.floor(d/60000)+' menit lalu';
+  if(d<86400000)return Math.floor(d/3600000)+' jam lalu';
+  if(d<30*86400000)return Math.floor(d/86400000)+' hari lalu';
+  return new Date(ts).toLocaleDateString();
+}
+function openInsp(ctx,id){
+  closeMenu();
+  inspTarget={ctx,id};
+  renderInsp();
+  document.getElementById('insp').classList.add('on');
+}
+function closeInsp(){
+  inspTarget=null;
+  document.getElementById('insp').classList.remove('on');
+}
+function renderInsp(){
+  if(!inspTarget)return;
+  const {ctx,id}=inspTarget;
+  const l=findL(id,ctx);
+  if(!l){closeInsp();return}
+  const h=healthCache[l.u];
+  const dom=domainOf(l.u);
+  const body=document.getElementById('ibody');
+  body.innerHTML=`
+    <div class="iface">
+      <img src="${escAttr(l.f||'')}" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect fill=%22%237C3AED%22 width=%22100%22 height=%22100%22 rx=%2220%22/><text fill=%22white%22 font-size=%2250%22 x=%2250%22 y=%2270%22 text-anchor=%22middle%22>${escAttr((l.t||'?')[0].toUpperCase())}</text></svg>'">
+      <div style="min-width:0">
+        <div class="it">${escHTML(l.t)}
+          <button class="star on" style="position:static;opacity:1;color:${l.isFavorite?'#F59E0B':'var(--muted)'}" onclick="toggleFav('${id}','${ctx}')" title="Favorite">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="${l.isFavorite?'currentColor':'none'}" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+          </button>
+        </div>
+        <div class="id_">${escHTML(dom)}</div>
+      </div>
+    </div>
+    <div class="iurl" onclick="copyUrl('${id}','${ctx}')" title="Klik untuk copy">${escHTML(l.u)}</div>
+    <div class="ihl"><span class="hdot ${h==='ok'?'ok':'unk'}"></span>${h==='ok'?'Reachable':'Not verified — browser tidak bisa memastikan'}
+      <button style="margin-left:auto;font-size:10px;color:var(--accent)" onclick="inspRecheck()">Check now</button></div>
+    <div class="ichips">
+      ${l.collection?`<span class="chip">${escHTML(l.collection)}</span>`:''}
+      ${(l.tags||[]).map(t=>`<span class="chip" style="background:var(--raised);color:var(--text-soft)">#${escHTML(t)}</span>`).join('')}
+      ${ctx==='adm'?'<span class="chip" style="background:rgba(244,63,94,.12);color:var(--bad)">🔒 private</span>':''}
+      ${l.archived?'<span class="chip" style="background:rgba(245,158,11,.12);color:var(--warn)">⬇ archived</span>':''}
+      ${l.trashedAt?`<span class="chip" style="background:rgba(244,63,94,.12);color:var(--bad)">🗑 ${Math.max(0,Math.ceil((l.trashedAt+TRASH_TTL-Date.now())/86400000))}d</span>`:''}
+      ${smartCategory(l)?`<span class="chip" style="background:var(--raised);color:var(--text-soft)">✦ ${escHTML(smartCategory(l))}</span>`:''}
+    </div>
+    <div class="istat">
+      <div class="sb_"><div class="sl_">Opened</div><div class="sv_">${l.openCount||0}×</div></div>
+      <div class="sb_"><div class="sl_">Last opened</div><div class="sv_">${timeAgo(l.lastOpenedAt)}</div></div>
+      <div class="sb_"><div class="sl_">Created</div><div class="sv_">${timeAgo(l.createdAt)}</div></div>
+      <div class="sb_"><div class="sl_">Updated</div><div class="sv_">${timeAgo(l.updatedAt)}</div></div>
+    </div>
+    ${l.notes?`<div class="sl_" style="font-size:9px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:5px">Notes</div><div class="inotes">${escHTML(l.notes)}</div>`:''}
+    ${sessions.filter(s=>s.items.some(it=>it.ctx===ctx&&it.id===id)).length?`<div class="sl_" style="font-size:9px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:5px">In sessions</div><div class="ichips">${sessions.filter(s=>s.items.some(it=>it.ctx===ctx&&it.id===id)).map(s=>`<span class="chip" style="cursor:pointer" onclick="setView('session','${escJS(s.id)}')">▶ ${escHTML(s.name)}</span>`).join('')}</div>`:''}
+  `;
+  document.getElementById('iacts').innerHTML=l.trashedAt?`
+    <button class="btnp btno" onclick="restoreLink('${ctx}','${id}')">↩ Restore</button>
+    <button class="btnp btno" style="border-color:rgba(244,63,94,.3);color:var(--bad)" onclick="permaDel('${ctx}','${id}');closeInsp()">Delete forever</button>
+  `:`
+    <button class="btnp" onclick="openLink('${id}','${ctx}')">Open ↗</button>
+    <button class="btnp btno" onclick="ed('${ctx}','${id}')">Edit</button>
+    <button class="btnp btno" onclick="${l.archived?`unarchiveLink('${ctx}','${id}')`:`archiveLink('${ctx}','${id}')`}">${l.archived?'↩ Unarchive':'⬇ Archive'}</button>
+    <button class="btnp btno" onclick="gen('${ctx}','${id}')">&lt;/&gt; HTML</button>
+  `;
+}
+async function inspRecheck(){
+  if(!inspTarget)return;
+  const l=findL(inspTarget.id,inspTarget.ctx);if(!l)return;
+  toast('Checking…','inf');
+  healthCache[l.u]=await pingLink(l);
+  renderInsp();render();
+  toast(healthCache[l.u]==='ok'?'Reachable ✓':'Tidak bisa diverifikasi browser','inf');
+}
+
 // ═══ MULTI-SELECT + BULK ACTIONS ═══
 function cardClick(e,id,ctx){
+  if(e.altKey){openInsp(ctx,id);return}
   if(e.ctrlKey||e.metaKey||sel.size){toggleSel(ctx+':'+id);return}
   openLink(id,ctx);
 }
@@ -1512,10 +1629,15 @@ document.getElementById('cpin').addEventListener('keydown',e=>{
 document.addEventListener('keydown',e=>{
   const typing=/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName||'');
   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();openCP();return}
+  if(e.key==='Escape'){ // works even while typing in a field
+    if(typing)document.activeElement.blur();
+    closeCP();closeMenu();clearSel();closeInsp();
+    document.querySelectorAll('.mo.on').forEach(m=>m.classList.remove('on'));
+    return;
+  }
   if(typing)return;
   if(e.key==='/'){e.preventDefault();openCP()}
   else if(e.key.toLowerCase()==='n'){e.preventDefault();ed(view.type==='private'&&auth?'adm':'pub',null)}
-  else if(e.key==='Escape'){closeCP();closeMenu();clearSel();document.querySelectorAll('.mo.on').forEach(m=>m.classList.remove('on'))}
 });
 
 // ═══ GENERATE HTML ═══
