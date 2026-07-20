@@ -19,7 +19,7 @@ Single-file link manager & start page. Buka `index.html` (atau host di GitHub Pa
 - **Private Vault terenkripsi** — AES-256-GCM, key diturunkan dari password via PBKDF2 (600k iterasi); auto-lock setelah 10 menit idle
 - **Gist sync** — Save/Load & merge ke GitHub Gist (Load tidak menimpa data lokal); vault diunggah dalam bentuk terenkripsi
 - **Import/Export** — JSON, CSV, Netscape Bookmark HTML
-- **Generate HTML** — dropdown links self-contained siap embed
+- **HTML Studio** — generate halaman links self-contained dengan live preview: layout dropdown/grid/list, tema dark/light, 5 accent, opsi favicon/search/tab baru; Copy Code atau Download .html
 - Dark/light theme, 5 accent color, ambient particles, hormati `prefers-reduced-motion`
 
 ## Keyboard
